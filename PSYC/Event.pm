@@ -1,7 +1,7 @@
 package Net::PSYC::Event;
 #
 #
-$VERSION = '0.1';
+$VERSION = '0.3';
 
 use strict;
 use Exporter;
@@ -14,7 +14,7 @@ my (%PSYC_SOCKETS);
 
 @ISA = qw(Exporter);
 @EXPORT = qw();
-@EXPORT_OK = qw(registerPSYC unregisterPSYC watch forget init startLoop add remove can_read can_write has_exception revoke);
+@EXPORT_OK = qw(registerPSYC unregisterPSYC watch forget init startLoop stopLoop add remove can_read can_write has_exception revoke);
 
 # waitPSYC hack!
 sub PSYC_SOCKETS { \%PSYC_SOCKETS }
@@ -29,7 +29,7 @@ sub registerPSYC {
     } else {
 	$obj = caller; # just a class.. that sux.
     }
-    print STDERR "registerPSYC($unl, $obj)\n" if Net::PSYC::DEBUG;
+    print STDERR "registerPSYC(".($unl||'').", $obj)\n" if Net::PSYC::DEBUG;
     foreach ((ref $unl) ? @$unl : ($unl)) {
 	if (!$_) {
 	    $UNL{'default'} = $obj;

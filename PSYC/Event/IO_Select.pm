@@ -1,7 +1,7 @@
 package Net::PSYC::Event::IO_Select;
 
 use vars qw($VERSION);
-$VERSION = '0.1';
+$VERSION = '0.3';
 
 use Exporter;
 
@@ -113,10 +113,12 @@ sub startLoop {
 	    return 1 if ($cb{$_[0]}->{$_}[0] != 0);
 	}
     }
+    return 1;
 }
 
 sub stopLoop {
     $LOOP = 0;
+    return 1;
 }
 
 1;

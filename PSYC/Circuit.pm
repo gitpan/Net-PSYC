@@ -1,6 +1,6 @@
 package Net::PSYC::Circuit;
 
-$VERSION = '0.1';
+$VERSION = '0.3';
 use vars qw($VERSION);
 
 use strict;
@@ -82,7 +82,8 @@ sub new {
 
     my $source = (Net::PSYC::UNL ne '/') ? { _source => Net::PSYC::UNL } : {};
     syswrite($self->{'SOCKET'}, ".\n");
-    $self->send(Net::PSYC::makePSYC('_notice_circuit_established', 'Connected!'), {
+    $self->send("psyc://$self->{'R_IP'}:$self->{'R_PORT'}/", 
+      Net::PSYC::makePSYC('_notice_circuit_established', 'Connected!'), {
 	_target => "psyc://$self->{'R_IP'}:$self->{'R_PORT'}/",
 	%$source,
 	_understand_modules => $self->{'_options'}->{'_understand_modules'},
@@ -160,7 +161,7 @@ sub refuse_modules {
 }
 
 sub send {
-    my ($self, $data, $vars) = @_;
+    my ($self, $target, $data, $vars) = @_;
 
     if (ref $data eq 'ARRAY') {
 	$vars->{'_counter'} = $self->{'FRAGMENT_COUNTER'}++; 
@@ -319,7 +320,7 @@ sub read () {
     unless ($self->{'LF'}) {
 	# we need to check for a leading ".\n"
 	# this is not the very best solution though.. 
-	if ($self->{'I_LENGTH'} >= 2) {
+	if ($self->{'I_LENGTH'} > 2) {
 	    if ( $self->{'I_BUFFER'} =~ s/^\.(\r?\n)//g ) {
 		$self->{'LF'} = $1;
 		# remember if the other side uses \n or \r\n

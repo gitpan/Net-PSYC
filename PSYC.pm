@@ -20,8 +20,13 @@ package Net::PSYC;
 # implemented - and none are specified in the PSYC spec. If you use
 # counters according to the spec you can implement your own safety
 # mechanism best suited for your application.
+#
+# Status: the Net::PSYC is pretty much stable. Just details and features
+# are being refined just as the protocol itself is, so from a software
+# developer's point of view this library is quite close to a 1.0 release.
+# After six years of development and usage that's presumably appropriate, too.
 
-$VERSION = '0.1';
+$VERSION = '0.12';
 
 use strict;
 
@@ -48,7 +53,7 @@ my %_options = (
 		registerPSYC makeMMP makePSYC parseMMP parsePSYC
 		sendMMP accept_modules refuse_modules getConnection
 		register_route register_host same_host
-		startLoop);
+		startLoop stopLoop);
 
  
 sub PSYC_PORT () { 4404 }	# default port for PSYC
@@ -113,7 +118,7 @@ sub import {
     }
     if ($list =~ /Event=(\S+)/ && Net::PSYC::Event::init($1)) {
 	import Net::PSYC::Event qw(watch forget registerPSYC unregisterPSYC 
-	                           add remove can_read startLoop);
+	                           add remove can_read startLoop stopLoop);
     }
 }
 
@@ -338,7 +343,7 @@ sub sendMSG {
     my $connection = getConnection( $target );
 
     return 0 if (!$connection); 
-    return $connection->send( makePSYC( $mc, $data, $vars ), $MMPvars ); 
+    return $connection->send( $target, makePSYC( $mc, $data, $vars ), $MMPvars ); 
 }
 
 #   sendMMP (target, data, vars)
@@ -357,7 +362,7 @@ sub sendMMP {
     
     my $connection = getConnection( $target );
     return 0 if (!$connection);
-    return $connection->send( $data, $vars );
+    return $connection->send( $target, $data, $vars );
 }
 
 sub psyctext {
