@@ -1,4 +1,7 @@
 package Net::PSYC::Client;
+
+$VERSION = '0.1';
+use vars qw($VERSION);
 #
 # implements some basic client functionality...
 # 
@@ -11,7 +14,6 @@ use Net::PSYC::Event qw(registerPSYC unregisterPSYC);
 use Net::PSYC::Tie::AbbrevHash;
 use Carp;
 
-use Data::Dumper;
 
 @ISA = qw(Exporter);
 @EXPORT = qw(register_context unregister_context register_new register_main msg psycLink psycUnlink sendMSG UNI NICK);
@@ -118,8 +120,6 @@ sub psycUnlink {
 
 sub query {
     my ($I, $target, $text, $action) = @_;
-    print "Net::PSYC::Client::query\n";
-    print Dumper(\@_);
     if(!ref $target && parseUNL($target)) {
 	$target = getContext($target)
     } elsif(my $uni = getUni($target) && $text) {

@@ -1,5 +1,7 @@
 package Net::PSYC::Circuit;
 
+$VERSION = '0.1';
+use vars qw($VERSION);
 
 use strict;
 use Carp;

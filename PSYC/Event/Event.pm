@@ -1,5 +1,8 @@
 package Net::PSYC::Event::Event;
 
+use vars qw($VERSION);
+$VERSION = '0.1';
+
 use Exporter;
 use strict;
 use Event qw(loop unloop);

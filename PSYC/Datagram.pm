@@ -1,12 +1,11 @@
 package Net::PSYC::Datagram;
-#
-#
-#
-#
+
+use vars qw($VERSION);
+$VERSION = '0.1';
+
 use strict;
 use Carp;
 use IO::Socket::INET;
-use Data::Dumper;
 
 sub TRUST {
     return 1;

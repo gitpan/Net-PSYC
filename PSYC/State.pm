@@ -1,4 +1,8 @@
 package Net::PSYC::State;
+
+use vars qw($VERSION);
+$VERSION = '0.1';
+
 # module implementing psyc-state-maintainance for objects...
 #
 # the state of mmp-vars is maintained by the connection

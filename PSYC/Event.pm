@@ -90,8 +90,6 @@ sub deliver {
 	    my ($MMPvars, $MMPdata) = $obj->recv(); # get a packet
 	    my $cb;
 	    
-#	    use Data::Dumper;
-#	    print Dumper($MMPvars, $MMPdata);
 	    return 1 if (!defined($MMPvars)); # incomplete .. stop
 	    
 	    next if ($MMPvars == 0); # fragment .. keep on going

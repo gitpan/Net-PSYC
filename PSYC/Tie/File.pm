@@ -1,5 +1,8 @@
 package Net::PSYC::Tie::File;
 
+use vars qw($VERSION);
+$VERSION = '0.1';
+
 # this modules ties a file to an array.. not line-wise but in chunks of bytes.
 # whatever.. fuck my english
 

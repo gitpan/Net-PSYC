@@ -1,5 +1,8 @@
 package Net::PSYC::Event::IO_Select;
 
+use vars qw($VERSION);
+$VERSION = '0.1';
+
 use Exporter;
 
 use strict;
