@@ -1,0 +1,27 @@
+for information about how to use Net::PSYC have a look at the pod included
+in the source-files. (perldoc PSYC.pm)
+
+even though this library is rather stable.. it should still be considered beta 
+since the API may change in future releases (I will try to avoid that, really). 
+
+INSTALL:
+
+    perl Makefile.PL
+    make
+    make install
+
+if you dont have 'make' just copy the following files like this:
+
+    PSYC.pm        => perl-path/site/lib/Net/PSYC.pm
+    PSYC/Circuit.pm => perl-path/site/lib/Net/PSYC/Circuit.pm
+    PSYC/Datagram.pm => perl-path/site/lib/Net/PSYC/Datagram.pm
+    PSYC/Event.pm => perl-path/site/lib/Net/PSYC/Event.pm
+    PSYC/State.pm => perl-path/site/lib/Net/PSYC/State.pm
+    PSYC/Event/Event.pm => perl-path/site/lib/Net/PSYC/Event/Event.pm
+    PSYC/Event/IO_Select.pm => perl-path/site/lib/Net/PSYC/Event/IO_Select.pm
+    PSYC/Event/Gtk2.pm => perl-path/site/lib/Net/PSYC/Event/Gtk2.pm
+    PSYC/Storage.pm => perl-path/site/lib/Net/PSYC/Storage.pm
+    PSYC/Client.pm => perl-path/site/lib/Net/PSYC/Client.pm
+    PSYC/Tie/AbbrevHash.pm => perl-path/site/lib/Net/PSYC/Tie/AbbrevHash.pm
+    PSYC/Tie/File.pm => perl-path/site/lib/Net/PSYC/Tie/File.pm
+
