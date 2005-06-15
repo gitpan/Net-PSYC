@@ -7,59 +7,91 @@ $VERSION = '0.1';
 #
 # the state of mmp-vars is maintained by the connection
 # object!
+#
+# a Tie::State would be nice.. which would react on such things as ^= in keys 
+# to the hash. that would make vars _stateful without any crazy class inheritance
+#
+# hmm.. sexy sexy
 
-
-# gets an UNL and a corresponding psyc-obj
-
-#   new ( class, UNL, psyc-obj )
-sub new {
-    
-    $self = {
-	'V'	=> {}, # psyc-vars
-	'UNL'	=> $_[1],
-	'O'	=> $_[2]
-    };
-    
-    return bless $self, shift;
-}
-
-#   sendMSG ( target, mc, data, vars[, source || mmp-vars ] )
-sub sendMSG {
+#   sendmsg ( target, mc, data, vars[, source || mmp-vars ] )
+sub sendmsg {
     my $self = shift;
-    if (!$_[4]) {
-	$_[4] = $self->{'UNL'};
-    } elsif (ref $_[4]) {
-	$_[4]->{'='}->{'_source'} ||= $self->{'UNL'};
+    my $s = $self->{'psyc_o_state'};
+
+    if (ref $_[4]) {
+	$_[4]->{'_source'} ||= $self->{'unl'};
+    } else {
+	$_[4] ||= $self->{'unl'};
     }
-    Net::PSYC::sendMSG($_[0], $_[1], $_[2], $_[3], $_[4]); 
+    
+    if (exists $s->{$_[0]}) {
+	foreach (keys %{$s->{$_[0]}}) {
+	    if (!exists $vars->{$_}) {
+		$vars->{$_} = '';
+	    } elsif ($vars->{$_} eq $s->{$_}) {
+		delete $vars->{$_};
+	    }
+	}
+    }
+
+    &Net::PSYC::sendmsg; 
 }
 
-#   msg ( source, mc, data, :, vars )
+#   msg ( source, mc, data, vars )
 sub msg {
     my $self = shift;
-    my ($source, $mc, $data, $vars, $mvars) = @_;
-    my $V = ( $self->{'V'}->{$source} ||= {} );
+    my $s = $self->{'psyc_i_state'};
 
-    # =
-    $V = { %$V, %{$mvars->{'='}} } if(exists $mvars->{'='});
-    # +
-    if (exists $mvars->{'+'}) {
-	foreach (keys %{$mvars->{'+'}}) {
-	    if (!ref $V->{$_}) {
-		$V->{$_} = [ $V->{$_} ];
-	    }
-	    push(@{$V->{$_}}, $mvars->{'+'}->{$_}) if (ref $V->{$_} eq 'ARRAY');
+    my ($source, $vars) = ($_[0], $_[3]);
+
+    if (exists $s->{$source}) {
+	foreach (keys %{$s->{$source}}) {
+	    $vars->{$_} = $s->{$source}->{$_} unless (exists $vars->{$_});
 	}
     }
-    # -
-    if (exists $mvars->{'-'}) {
-	foreach my $a (keys %{$mvars->{'-'}}) {
-	    if (ref $V->{$_} eq 'ARRAY') {
-		grep {$_ ne $a} @{$V->{$_}};
-	    }
-	}
-    }
-    $self->{'O'}->msg($source, $mc, $data, { %$V, %$vars }, $mvars);
 }
+
+#	    ( source, key, value )
+sub diminish {
+    my $self = shift;
+    my $s = $self->{'psyc_i_state'};
+
+    my ($source, $key, $value) = @_;
+    $s->{$source} = {} unless (exists $s->{$source});
+    
+    if (exists $s->{$source}->{$key}) {
+	if (ref $s->{$source}->{$key} ne 'ARRAY') {
+	    delete $s->{$source}->{$key} if ($s->{$source}->{$key} eq $value);
+	} else {
+	    @{$s->{$source}->{$key}} = grep { $_ ne $value } @{$s->{$source}->{$key}};
+	}
+    }
+}
+
+sub augment {
+    my $self = shift;
+    my $s = $self->{'psyc_i_state'};
+
+    my ($source, $key, $value) = @_;
+    $s->{$source} = {} unless (exists $s->{$source});
+    unless (exists $s->{$source}->{$key}) {
+	$s->{$source}->{$key} = [ $value ];
+    } elsif (ref $s->{$source}->{$key} ne 'ARRAY') {
+	$s->{$source}->{$key} = [ $s->{$source}->{$key}, $value ];
+    } else {
+	push(@{$s->{$source}->{$key}}, $value);
+    }
+}
+
+sub assign {
+    my $self = shift;
+    my $s = $self->{'psyc_i_state'};
+
+    my ($source, $key, $value) = @_;
+    $s->{$source} = {} unless (exists $s->{$source});
+    $s->{$source}->{$key} = $value;
+}
+
+
 
 1;

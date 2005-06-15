@@ -7,13 +7,14 @@ use Exporter;
 use strict;
 
 use Gtk2::Helper;
+use Net::PSYC qw(W);
 use Glib;
 use vars qw(@ISA @EXPORT_OK);
 
 @ISA = qw(Exporter);
-@EXPORT_OK = qw(init can_read can_write has_exception add remove startLoop stopLoop revoke);
+@EXPORT_OK = qw(init can_read can_write has_exception add remove start_loop stop_loop revoke);
 
-my (%r, %w, %revoke);
+my (%r, %w, %revoke, @t);
 
 sub can_read {
     croak('can_read() is not yet implemented by Net::PSYC::Event::Gtk2');
@@ -31,8 +32,8 @@ sub has_exception {
 #   add (\*fd, flags, cb[, repeat])
 sub add {
     my ($fd, $flags, $cb, $repeat) = @_;
-    croak('add () using Gtk2 requires a callback!') if (!$cb);
-    print STDERR "Net::PSYC::Event::Gtk2->add($fd, $flags, $cb)\n" if Net::PSYC::DEBUG;
+    W("Net::PSYC::Event::Gtk2->add($fd, $flags, $cb)");
+    croak('add () using Gtk2 requires a callback! (has to be a code-ref)') if (!$cb || !ref $cb eq 'CODE' );
     
     # one-shot event!
     if (defined($repeat) && $repeat == 0) {
@@ -53,14 +54,14 @@ sub add {
 	$w{scalar($fd)} = Gtk2::Helper->add_watch(fileno($fd), 'out', $cb);
     }
     if ($flags =~ /e/) {
-	print STDERR "Callbacks on error are not supported jet. Asl the author of this module to implement is.. he will! :)\n";
+	croak("Callbacks on error are not supported jet. Ask the author of this module to implement it..\n");
     }
 }
 
 #   revoke ( \*fd )
 sub revoke {
     my $name = scalar(shift);
-#   print "Net::PSYC::Event::Gtk2->revoke($name)\n" if Net::PSYC::DEBUG;
+    W("Net::PSYC::Event::Gtk2->revoke($name)",2);
     if (exists $revoke{$name}) {
 	my $flags = $revoke{$name}->[1];
 	return if ((!$flags =~ /r/ || exists $r{$name}) && (!$flags =~ /w/ || exists $w{$name}));
@@ -87,11 +88,11 @@ sub remove {
 
 
 
-sub startLoop {
+sub start_loop {
     croak('Net::PSYC::Event::Gtk2 does not implement an EventLoop. Use the one implemented by Gtk2!');
 }
 
-sub stopLoop {
+sub stop_loop {
     croak('Net::PSYC::Event::Gtk2 does not implement an EventLoop. Use the one implemented by Gtk2!');
 }
 

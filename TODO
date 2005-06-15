@@ -1,12 +1,2 @@
-make PSYC/Datagram.pm
-    - build check for corrupted packets to protect the udp 
-      port from pollution
-
-
-write more test-scripts for:
-    - fragmentated message parsing
-    - binary message parsing
-    - fragmented packet from file
-    - file-map checks
-    - basic set checks (union, relative_complement, intersection)
-    
+- tls_server ability
+- negotiation using +_ .. 

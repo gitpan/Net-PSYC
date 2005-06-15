@@ -55,13 +55,15 @@ sub readUNL {
 }
 
 sub readpass {
+	my $me = lc(shift);
 	my $I;
 	unless (open($I, $ENV{HOME}.path.'auth')) {
 	    warn "Consider putting '<UNI> <pass>' into ~/.psyc/auth\n...";
 	    return 0;
 	}
 	while(<$I>) {
-		last if ($UNI, $pass) = /^(psyc:\S+)\s+(\S+)$/;
+		($UNI, $pass) = /^(psyc:\S+)\s+(\S+)$/;
+		last if $me and not $me cmp lc($UNI);
 	}
 	close $I;
 	return $pass;
@@ -69,12 +71,12 @@ sub readpass {
 
 sub UNL() { $UNL || readUNL; }
 sub UNI() { $UNI || readUNI; }
-sub pass() { $pass || readpass; }
+sub pass() { $pass || readpass($UNI); }
 sub nick {
 	return $nick if $nick;
 	return $nick if $nick = $ENV{PSYCNICK} || $ENV{NICK};
 	if (UNI) {
-	    my ($user, $host, $port, $type, $object) = parseUNL(UNI);
+	    my ($user, $host, $port, $type, $object) = parse_uniform(UNI);
 	    return $nick = $user if $user;
 	    return $nick = $1 if $object =~ m#~(\S+)/?#;
 	}

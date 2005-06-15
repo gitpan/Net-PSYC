@@ -1,11 +1,17 @@
 package Net::PSYC::Datagram;
 
 use vars qw($VERSION);
-$VERSION = '0.4';
+$VERSION = '0.5';
 
 use strict;
-use Carp;
 use IO::Socket::INET;
+
+use Net::PSYC::Event qw(add watch);
+
+INIT {            
+    require Net::PSYC;
+    import Net::PSYC qw(W sendmsg same_host send_mmp parse_uniform AUTOWATCH makeMSG make_psyc parse_psyc parse_mmp PSYC_PORT PSYCS_PORT register_host register_route make_mmp UNL);
+}
 
 sub TRUST {
     return 1;
@@ -20,7 +26,7 @@ sub new {
     my %a = (LocalPort => $port, Proto => 'udp');
     $a{LocalAddr} = $addr if $addr;
     my $socket = IO::Socket::INET->new(%a)
-	or (croak("UDP bind to $addr:$port says: $@") && return 0);
+	or (W("UDP bind to $addr:$port says: $!",0) && return 0);
     my $self = {
 	'SOCKET' => $socket,
 	'IP' => $socket->sockhost,
@@ -31,23 +37,26 @@ sub new {
 	'O_COUNT'  => 0,
 	'LF' => '',
     };
-    print STDERR "UDP bind to $self->{'IP'}:$self->{'PORT'} successful\n" if Net::PSYC::DEBUG;
-    return bless $self, $class; 
+    W("UDP bind to $self->{'IP'}:$self->{'PORT'} successful");
+    bless $self, $class; 
+    watch($self) if (AUTOWATCH());
+    return $self;
 }
 
 #   send ( target, mc, data, vars ) 
 sub send {
     my $self = shift;
     my ( $target, $data, $vars ) = @_;
-
+    W("send($target, $data, ".($vars||'undef').")",2);
+    
     push(@{$self->{'O_BUFFER'}}, [ [$target, $data, $vars ] ]);
 
-    if (!$Net::PSYC::AUTOWATCH) { # got no eventing.. send the packet instantly
-        return $self->write();
+    if (!AUTOWATCH() || $Net::PSYC::ANACHRONISM) { # send the packet instantly
+        return !$self->write(); 
     } else {
         Net::PSYC::Event::revoke($self->{'SOCKET'});
     }
-    return 1;
+    return 0;
 }
 
 sub write () {
@@ -58,9 +67,9 @@ sub write () {
     # get a packet from the buffer
     my $packet = shift(@{${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]});
     my $target = shift(@$packet);
-    my ($user, $host, $port, $type, $object) = Net::PSYC::parseUNL($target);
+    my ($user, $host, $port, $type, $object) = parse_uniform($target);
     
-    $port ||= Net::PSYC::PSYC_PORT();
+    $port ||= PSYC_PORT();
     
     $packet->[1]->{'_target'} ||= $target;
 
@@ -71,9 +80,9 @@ sub write () {
 #   $vars->{'_source'} |= "psyc://$self->{'IP'}:$self->{'PORT'}/";
 
     my $m = ".\n"; # empty packet!
-    $m .= Net::PSYC::makeMMP(reverse @$packet);
+    $m .= make_mmp(reverse @$packet);
     
-    ($port && $host) or croak('usage: obj->send( $target[, $method[, $data[, $vars[, $mvars]]]] )');
+    ($port && $host) or W('usage: obj->send( $target[, $method[, $data[, $vars[, $mvars]]]] )',0);
 
     my $taddr = gethostbyname($host); # hm.. strange thing!
     my $tin = sockaddr_in($port, $taddr);
@@ -81,11 +90,10 @@ sub write () {
     if (!defined($self->{'SOCKET'}->send($m, 0, $tin))) {
 	unshift(@$packet, $target);
         unshift(@{${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]}, $packet);
-        croak($!);
+        W($!,0);
         return $!;
     }
-    print STDERR "UDP[$self->{'IP'}:$self->{'PORT'}] <= ".($packet->[1]->{'_source'}||Net::PSYC::UNL())."\n"
-	if Net::PSYC::DEBUG;
+    W("UDP[$self->{'IP'}:$self->{'PORT'}] <= ".($packet->[1]->{'_source'}||UNL()));
     if (!scalar(@{${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]})) {
         # all fragments of this packet sent
         splice(@{$self->{'O_BUFFER'}}, $self->{'O_COUNT'}, 1);
@@ -95,7 +103,11 @@ sub write () {
         $self->{'O_COUNT'} = 0 if (!${$self->{'O_BUFFER'}}[++$self->{'O_COUNT'}]);
     }
     if(scalar(@{$self->{'O_BUFFER'}})) {
-        Net::PSYC::Event::revoke($self->{'SOCKET'});
+	if (!AUTOWATCH() || $Net::PSYC::ANACHRONISM) {
+	    $self->write();
+	} else {
+	    Net::PSYC::Event::revoke($self->{'SOCKET'});
+	}
     }
     return 1;
 }
@@ -114,17 +126,21 @@ sub read () {
     return 1;
 }
 
+sub negotiate { 1 }
+
 #   returns _one_ mmp-packet .. or undef if the buffer is empty
 sub recv () {    
     my $self = shift;
-    print STDERR length($self->{'I_BUFFER'})."\n";
     if (length($self->{'I_BUFFER'}) > 2) {
 	if ( $self->{'LF'} || $self->{'I_BUFFER'} =~ s/^\.(\r?\n)//g ) {
 	    
 	    $self->{'LF'} ||= $1;
-	    my ($vars, $data) = Net::PSYC::MMPparse(\$$self{'I_BUFFER'}, $self->{'LF'});
+	    my ($vars, $data) = parse_mmp(\$$self{'I_BUFFER'}, $self->{'LF'});
 	    return if (!defined $vars);
-	    $vars = $vars->{':'};
+	    unless (exists $vars->{'_source'}) {
+		my ($port, $ip) = sockaddr_in($self->{'LAST_RECV'});
+		$vars->{'_source'} = "psyc://$ip:$port";
+	    }
 	    return ($vars, $data);
 	}
 	# TODO : we need to provide a proper algorithm to clean up the

@@ -1,8 +1,32 @@
-for information about how to use Net::PSYC have a look at the pod included
-in the source-files. (perldoc PSYC.pm)
+About PSYC:
 
-even though this library is rather stable.. it should still be considered beta 
-since the API may change in future releases (I will try to avoid that, really). 
+    PSYC is a flexible text-based protocol for delivery of data to a flexible
+    amount of recipients by unicast or multicast TCP or UDP. It is primarily
+    used for chat conferencing, multicasting presence, friendcasting, 
+    newscasting, event notifications and plain instant messaging, but not 
+    limited to that.
+
+    Existing systems can easily use PSYC, since PSYC hides its complexity from
+    them. For example if an application wants to send data to one person or a
+    group of people, it just needs to drop a few lines of text into a TCP
+    connection (or UDP packet) to a static address. In other words: trivial.
+
+    The PSYC network resembles more the Web rather than IRC, which it once was
+    inspired by. Each administrator of a machine on the Internet can install a
+    PSYC server which has equal rights in the world wide network. #
+    No hierarchies, no boundaries. The administrator then has the right to 
+    decide which rooms or people to host, without interfering with other PSYC 
+    servers. Should an administrator behave incorrectly towards her users, 
+    they will simply move on to a different server. Thus, administrators must be
+    have to be a popular PSYC host for their friends and social network.
+
+    This implementation is in pretty stable and has been doing a good job in
+    production environments for several years.
+
+    See http://psyc.pages.de for protocol specs and other info on PSYC.
+
+    for information about how to use Net::PSYC have a look at the pod included
+    in the source-files. (perldoc PSYC.pm)
 
 INSTALL:
 
@@ -10,20 +34,5 @@ INSTALL:
     make
     make install
 
-if you dont have 'make' just copy the following files like this:
 
-    PSYC.pm        => perl-path/site/lib/Net/PSYC.pm
-    PSYC/Circuit.pm => perl-path/site/lib/Net/PSYC/Circuit.pm
-    PSYC/Datagram.pm => perl-path/site/lib/Net/PSYC/Datagram.pm
-    PSYC/Event.pm => perl-path/site/lib/Net/PSYC/Event.pm
-    PSYC/State.pm => perl-path/site/lib/Net/PSYC/State.pm
-    PSYC/Event/Event.pm => perl-path/site/lib/Net/PSYC/Event/Event.pm
-    PSYC/Event/IO_Select.pm => perl-path/site/lib/Net/PSYC/Event/IO_Select.pm
-    PSYC/Event/Gtk2.pm => perl-path/site/lib/Net/PSYC/Event/Gtk2.pm
-    PSYC/Storage.pm => perl-path/site/lib/Net/PSYC/Storage.pm
-    PSYC/Client.pm => perl-path/site/lib/Net/PSYC/Client.pm
-    PSYC/Tie/AbbrevHash.pm => perl-path/site/lib/Net/PSYC/Tie/AbbrevHash.pm
-    PSYC/Tie/File.pm => perl-path/site/lib/Net/PSYC/Tie/File.pm
-
-
-
+http://perlpsyc.pages.de

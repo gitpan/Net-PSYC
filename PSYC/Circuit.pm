@@ -1,6 +1,6 @@
 package Net::PSYC::Circuit;
 
-$VERSION = '0.3';
+$VERSION = '0.4';
 use vars qw($VERSION);
 
 use strict;
@@ -8,8 +8,13 @@ use Carp;
 use Socket;
 use IO::Socket::INET;
 
+use Net::PSYC::MMP::State;
 use Net::PSYC::Event qw(add watch);
 
+INIT {
+    require Net::PSYC;
+    import Net::PSYC qw(W sendmsg same_host send_mmp parse_uniform AUTOWATCH makeMSG make_psyc parse_psyc parse_mmp PSYC_PORT PSYCS_PORT register_host register_route make_mmp UNL);
+}
 
 sub listen {
 	# looks funky.. eh? undef makes IO::Socket handle INADDR_ANY properly
@@ -24,7 +29,7 @@ sub listen {
 		        Blocking => 0,
                         Reuse => 1)
 	|| (croak('TCP bind to '.($_[1] || '127.0.0.1')
-		 .':'.($_[2] || 'any')." says: $@") && return 0);
+		 .':'.($_[2] || 'any')." says: $!") && return 0);
     my $self = { 
 	'SOCKET' => $socket,
 	'IP' => $socket->sockhost(),
@@ -33,10 +38,9 @@ sub listen {
 	'TYPE' => 'c',
 	'_options' => $_[3],
     };
-    print STDERR "TCP Listen $self->{'IP'}:$self->{'PORT'} successful.\n"
-	if Net::PSYC::DEBUG; #  <---  wie macht man den import richtig?
+    W("TCP Listen $self->{'IP'}:$self->{'PORT'} successful.");
     bless $self, 'Net::PSYC::Circuit::L';
-    watch($self) if Net::PSYC::AUTOWATCH;
+    watch($self) if AUTOWATCH();
     return $self;
 }
 
@@ -45,53 +49,64 @@ sub new {
     my ($class, $socket, $vars) = @_;
     my $self = {
 	'_options' => (ref $vars eq 'HASH') ? $vars : {},
-	'r_options' => {},
 	'SOCKET' => $socket,
 	'TYPE' => 'c',
 	'I_BUFFER' => '',
 	'O_BUFFER' => [],
 	'O_COUNT' => 0,
-	'VARS' => {},
-	'STATE_MEM' => {},
 	'IP' => $socket->sockhost(),
 	'PORT' => $socket->sockport(),
 	'R_IP' => $socket->peerhost(),
 	'R_PORT' => $socket->peerport(),
-	'LAST_RECV' => $socket->peerhost(),
+	'LAST_RECV' => $socket->peername(),
 	'CACHE' => {}, # cache for fragmented data
 	'I_LENGTH' => 0, # whether _length of incomplete
 			 # packets exceeds buffer-length
 	'FRAGMENT_COUNT' => 0,
+	'L' => 0,
     };
     bless $self, 'Net::PSYC::Circuit::C';
+
+    $self->{'L'} = 1 if (caller() eq 'Net::PSYC::Circuit::L');
+    
+    $self->{'_state'} = new Net::PSYC::MMP::State($self);
+    $self->{'_state'}->init();
     
     $self->{'R_HOST'} = gethostbyaddr($socket->peeraddr(), AF_INET) || $self->{'R_IP'};
-    
+    $self->{'peeraddr'} = "psyc://$self->{'R_HOST'}:$self->{'R_PORT'}/"; 
     $Net::PSYC::C{"$self->{'R_IP'}\:$self->{'R_PORT'}"} = $self;
     
-    Net::PSYC::register_host($self->{'R_IP'}, inet_ntoa($socket->peeraddr()));
-    Net::PSYC::register_host($self->{'R_IP'}, $self->{'R_HOST'}) if ($self->{'R_HOST'});
-    Net::PSYC::register_host('127.0.0.1', $self->{'IP'});
-    Net::PSYC::register_host('127.0.0.1', 'localhost');
-    $self->TRUST(11) if (Net::PSYC::same_host('127.0.0.1', $self->{'R_IP'}));
-    Net::PSYC::register_route("$self->{'R_HOST'}\:$self->{'R_PORT'}", $self);
-    Net::PSYC::register_route(inet_ntoa($socket->peeraddr()).":$self->{'R_PORT'}", $self);
+    register_host($self->{'R_IP'}, inet_ntoa($socket->peeraddr()));
+    register_host($self->{'R_IP'}, $self->{'R_HOST'}) if ($self->{'R_HOST'});
+    register_host('127.0.0.1', $self->{'IP'});
+    register_host('127.0.0.1', 'localhost');
+    $self->TRUST(11) if (same_host('127.0.0.1', $self->{'R_IP'}));
+    register_route("$self->{'R_HOST'}\:$self->{'R_PORT'}", $self);
+    register_route(inet_ntoa($socket->peeraddr()).":$self->{'R_PORT'}", $self);
 
-    print STDERR "TCP: Connected with $self->{'R_IP'}\:$self->{'R_PORT'}\n" if Net::PSYC::DEBUG;
-    watch($self) if Net::PSYC::AUTOWATCH;
-
-    my $source = (Net::PSYC::UNL ne '/') ? { _source => Net::PSYC::UNL } : {};
-    syswrite($self->{'SOCKET'}, ".\n");
-    $self->send("psyc://$self->{'R_IP'}:$self->{'R_PORT'}/", 
-      Net::PSYC::makePSYC('_notice_circuit_established', 'Connected!'), {
-	_target => "psyc://$self->{'R_IP'}:$self->{'R_PORT'}/",
+    W("TCP: Connected with $self->{'R_IP'}\:$self->{'R_PORT'}", 1);
+    watch($self) if AUTOWATCH();
+    
+    my $source = (UNL() ne '/') ? { _source => UNL() } : {};
+    $self->{'greet'} = make_mmp(
+    {
+	'_target' => $self->{'peeraddr'},
 	%$source,
-	_understand_modules => $self->{'_options'}->{'_understand_modules'},
-	_accept_modules => $self->accept_modules(),
-	_understand_protcols => $self->{'_options'}->{'_understand_protocols'},
-	_using_protocols => $self->{'_options'}->{'_understand_protocols'}, # TODO
-	_implementation => $self->{'_options'}->{'_implementation'},
-    });
+    },
+    make_psyc('_notice_circuit_established', 
+		    'Connection to [_source] established!')); 
+    $self->{'greet'} .= make_mmp(
+    {}, 
+    make_psyc('_status_circuit','',
+	$self->{'_options'})
+    );
+    if (!AUTOWATCH() || $self->{'L'} || $Net::PSYC::ANACHRONISM) {
+	# fire!
+	$self->{'r_options'} = {};
+	syswrite($self->{'SOCKET'}, ".\n");
+	syswrite($self->{'SOCKET'}, delete $self->{'greet'});
+    }
+    
     return $self;
 }
 
@@ -99,36 +114,32 @@ sub connect {
     my $socket = IO::Socket::INET->new(Proto     => 'tcp',
                                        PeerAddr  => $_[1],
 				       Blocking	=> 1,
-                                       PeerPort  => $_[2] || Net::PSYC::PSYC_PORT );
-    if (!$socket || !$socket->connected()) {
-	print STDERR "TCP connect to $_[1]:".($_[2]||Net::PSYC::PSYC_PORT)." says: $!\n";
+                                       PeerPort  => $_[2] || PSYC_PORT() );
+    if (!$socket) {
+	W("TCP connect to $_[1]:".($_[2]||PSYC_PORT())." says: $!", 0);
 	return 0;
     }
     return Net::PSYC::Circuit->new($socket, $_[3]);
 }
-
-sub ssl_connect {
-    require IO::Socket::SSL;
-    my $socket = IO::Socket::SSL->new(Proto     => 'tcp',
-				      PeerAddr  => $_[1],
-				      Blocking	=> 1,
-				      PeerPort  => $_[2] || Net::PSYC::PSYCS_PORT );
-
-    if (!$socket || !$socket->connected()) {
-	print STDERR "TCP connect to $_[1]:".($_[2]||Net::PSYC::PSYCS_PORT)." says: $!\n";
-	return 0;
-    }
-    return Net::PSYC::Circuit->new($socket, $_[3]);
-}
-
 
 # TCP connection class
 package Net::PSYC::Circuit::C;
 
+
 use bytes;
 use strict;
+use vars qw(@ISA);
+
 use Carp;
 
+use Net::PSYC::Hook;
+
+INIT {
+    require Net::PSYC;
+    import Net::PSYC qw(W sendmsg same_host send_mmp parse_uniform AUTOWATCH makeMSG make_psyc parse_psyc parse_mmp make_mmp register_route register_host);
+}
+
+@ISA = qw(Net::PSYC::Hook);
 
 sub TRUST {
     my $self = shift;
@@ -138,139 +149,97 @@ sub TRUST {
     return $self->{'TRUST'} || 3;
 }
 
-sub accept_modules {
+sub use_module {
     my $self = shift;
-    my $changed = 0;
-    foreach (@_) {
-	next if(!$self->{'_options'}->{'_understand_modules'} =~ /$_/);
-	next if($self->{'_options'}->{'_accept_modules'} =~ /$_/);
-	$self->{'_options'}->{'_accept_modules'} =~ s/\ /\ $_\ /;
-	$changed = 1;
-    }
-    if ($changed) {
-	$self->send('',{_accept_modules=>$self->{'_accept_modules'}});
-    }
-    return $self->{'_options'}->{'_accept_modules'};
+    my $mod = shift;
 }
 
-sub refuse_modules {
+sub tls_init_server { 1 }
+sub tls_init_client {
     my $self = shift;
-    foreach (@_) {
-	$self->{'_options'}->{'_accept_modules'} =~ s/\ ?$_\ ?/ /g;
+    my $t = IO::Socket::SSL->start_SSL($self->{'SOCKET'}); 
+#	SSL_server => ($self->{'L'}) ? 1 : 0);
+    if (ref $t ne 'IO::Socket::SSL') {
+	return 1;
+    }
+    W("Using encryption to $self->{'peeraddr'}.",0);
+    $self->{'SOCKET'} = $t;
+    if (AUTOWATCH()) {
+	Net::PSYC::Event::forget($self);
+	Net::PSYC::Event::watch($self);
+	Net::PSYC::Event::revoke($self->{'SOCKET'}, 'w');
     }
 }
 
 sub send {
-    my ($self, $target, $data, $vars) = @_;
-
+    my ($self, $target, $data, $vars, $prio) = @_;
+    W("send($self, $target, ".($data||'').", ".($vars||'undef').
+      ", ".($prio||'undef').")",2);
     if (ref $data eq 'ARRAY') {
 	$vars->{'_counter'} = $self->{'FRAGMENT_COUNTER'}++; 
+	$vars->{'_amount_fragments'} = scalar(@$data);
     } else {
 	$data = [ $data ];
     }
 
     push(@{$self->{'O_BUFFER'}}, [ $data, $vars, 0 ]);
 
-    if (!Net::PSYC::AUTOWATCH) { # got no eventing.. send the packet instantly
+    $self->{'O_COUNT'} = scalar(@{$self->{'O_BUFFER'}}) - 1 if ($prio);
+    
+    if (!AUTOWATCH() || $Net::PSYC::ANACHRONISM) { # send the packet instantly
         $self->write();
     } else {
 	Net::PSYC::Event::revoke($self->{'SOCKET'}, 'w');
     }
     
-    return 1;
+    return 0;
 }
 
-sub write () {
-    my $self = shift;
-    return 1 if (!${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]); # no packets!
-    
-    my ($data, $vars, $count) = @{$self->{'O_BUFFER'}->[$self->{'O_COUNT'}]};
-    use Storable qw(dclone);
-    my $TMPvars = dclone($vars); # we desperately need a copy here..
-                                 # since we will mess around with it
-    my $state = $self->{'STATE_MEM'};
+# no state here! dont use this function unless you have brass balls. i mean it!
+sub fire {
+    my ($self, $target, $mc, $data, $vars) = @_;
+    $vars->{'_target'} = $target if $target;
+    my $m = makeMSG($mc, $data, $vars);
 
-    ####
-    # DEATH to TMPvars [ we delete ]
-    # implementation of automatic state.. "3 * :" -> "="
-    # if the packet is not send.. this sux TODO
-#   foreach (keys %$vars) {
-#   _length, _context .. should not be set! TODO
-    foreach (keys %$state) {
-	
-	# _reset 
-	if ($state->{$_}->[1] > 3 && !exists $vars->{$_}) {
-	    $TMPvars->{$_} = '';
-	    next;
-	}
-	
-	if (exists $vars->{$_} && $state->{$_}->[0] eq $vars->{$_}) {
-	    if ($state->{$_}->[1] == 3
-	    && !$TMPvars->{'='}->{$_}) { # do not overwrite
-		
-		$TMPvars->{'='}->{$_} = delete $TMPvars->{$_};
-	    } elsif ($state->{$_}->[1] > 3) {
-		delete $TMPvars->{$_};
-	    }
-	    $state->{$_}->[1]++ if ($state->{$_}->[1] < 10);
-	    # ^^
-	    # this is wrong if we fail to send
-	} 
-    }
-    ####
-    
-    $TMPvars->{'_fragment'} = $count if ($vars->{'_amount_fragments'});
-    
-    my $m = Net::PSYC::makeMMP($TMPvars, $data->[$count]);
+    $self->trigger('encrypt', \$m);
+
     if (!defined(syswrite($self->{'SOCKET'}, $m))) {
 	# put the packet back into the queue
 	croak($!);
 	return 1;
     }
-    #sleep(1);
+}
 
-    ###
-    # STATE 
-    # sent was successful .. remember the vars
-    foreach (keys %{$$TMPvars{'='}}) {
-	if ($TMPvars->{'='}->{$_} eq '') {
-	    delete $state->{$_};
-	} else {
-	    $state->{$_} = [ $TMPvars->{'='}->{$_}, 4 ];
-	}
-    }
-    foreach (keys %$TMPvars) {
-	if ($TMPvars->{$_} eq '') {
-	    # TODO
-	}
-    }
-    foreach (keys %$vars) {
-	next if ($_ eq ':' || $_ eq '+' || $_ eq '-' || $_ eq '?');
-	next if (exists $state->{$_} && $state->{$_}->[0] eq $vars->{$_});
-	if (exists $state->{$_} && $state->{$_}->[1] > 4) {
-	    $state->{$_}->[1]--;
-	    next;
-    	}
-	$state->{$_} = [ $vars->{$_}, 1 ];
-    }
-    #
-    ###
+sub write () {
+    my $self = shift;
     
-#    open(file, ">>$self->{'HOST'}:$self->{'PORT'}.out");
-#    print file $m;
-#    close file;
-#    print "TCP: Wrote $w/".length($m)." bytes to the socket!\n";
-    if (Net::PSYC::DEBUG > 1) {
-	print STDERR "TCP: >>>>>>>> OUTGOING >>>>>>>>\n";
-	print STDERR $m;
-	print STDERR "\nTCP: <<<<<<< OUTGOING <<<<<<<\n";
-    } 
-    if (Net::PSYC::DEBUG) {
-	my ($mc) = $m =~ m/^(_.+?)$/m;
-	print STDERR "TCP[$self->{'R_IP'}:$self->{'R_PORT'}] <= ".
-	($vars->{'_source'} || $state->{'_source'}->[0]).": ".($mc || 'MMP')."\n";
+    # no permission to send packets.. and we are not wierdo enough!
+    return 1 unless (exists $self->{'r_options'});
+    
+    return 1 if (!${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]); # no packets!
+    
+    my ($data, $vars, $count) = @{$self->{'O_BUFFER'}->[$self->{'O_COUNT'}]};
+    
+
+    $vars->{'_fragment'} = $count if ($vars->{'_amount_fragments'});
+
+    my $d = $data->[$count];
+    use Storable qw(dclone);
+    $vars = dclone($vars); # we would not need that.. but the current design.. TODO
+    $self->trigger('send', $vars, \$d);
+    
+    my $m = make_mmp($vars, $d);
+    $self->trigger('encrypt', \$m);
+
+    if (!defined(syswrite($self->{'SOCKET'}, $m))) {
+	# put the packet back into the queue
+	croak($!);
+	return 1;
     }
-	
+    
+    $self->trigger('sent', $vars, \$d);
+    W("TCP: wrote ".length($m)." bytes of data to the socket",2);     
+    W("TCP: >>>>>>>> OUTGOING >>>>>>>>\n$m\nTCP: <<<<<<< OUTGOING <<<<<<<\n",2);
     if (($vars->{'_amount_fragments'} || @$data) == $count + 1) {
 	# all fragments of this packet sent
 	# delete it..
@@ -284,7 +253,7 @@ sub write () {
     }
     $self->{'O_COUNT'} = 0 unless ( $self->{'O_BUFFER'}->[$self->{'O_COUNT'}] );
     if ( @{$self->{'O_BUFFER'}} ) {
-	if (!Net::PSYC::AUTOWATCH) { # got no eventing.. send the packet 
+	if (!AUTOWATCH() || $Net::PSYC::ANACHRONISM) { # send the packet 
 	    $self->write();
 	} else {
 	    Net::PSYC::Event::revoke($self->{'SOCKET'}, 'w');
@@ -297,12 +266,18 @@ sub read () {
     my $self = shift;
     my ($data, $read);
     
-    $read = sysread($self->{'SOCKET'}, $data, 8192);
+    # if you change the buffer-size.. remember to fix buffersize of
+    # MMP::Compress and rest..
+    $read = sysread($self->{'SOCKET'}, $data, 4096);
     
     return if (!$read); # connection lost !?
     # gibt es nen 'richtigen' weg herauszufinden, ob die connection noch lebt?
     # connected() und die ganzen anderen socket-funcs helfen einem da in
     # den ekligen fällen nicht..
+    
+    $self->trigger('decrypt', \$data);
+
+    
     $$self{'I_BUFFER'} .= $data;
     warn $! unless (defined($read));
     $self->{'I_LENGTH'} += $read;
@@ -310,12 +285,8 @@ sub read () {
 #    print file $data;
 #    print file "\n========\n";
 #    close file;
-    if (Net::PSYC::DEBUG > 1) {
-	print STDERR "TCP: Read $read bytes from socket.\n";
-	print STDERR "TCP: >>>>>>>> INCOMING >>>>>>>>\n";
-	print STDERR $data;
-	print STDERR "\nTCP: <<<<<<< INCOMING <<<<<<<\n";
-    } 
+    W("TCP: Read $read bytes from socket.\n",2);
+    Net::PSYC::W("TCP: >>>>>>>> INCOMING >>>>>>>>\n$data\nTCP: <<<<<<< INCOMING <<<<<<<\n",2);
     
     unless ($self->{'LF'}) {
 	# we need to check for a leading ".\n"
@@ -328,7 +299,7 @@ sub read () {
 		# and safe parsing
 	    } else {
 		syswrite($self->{'SOCKET'}, "protocol error\n");
-		print STDERR "Closed Connection to $self->{'R_HOST'}\n";
+		W("Closed Connection to $self->{'R_HOST'}", 0);
 		Net::PSYC::shutdown($self);
 	    }
 	}
@@ -347,67 +318,56 @@ sub recv () {
     return if ($self->{'I_LENGTH'} < 0 || !$self->{'I_BUFFER'});
     
     my $_v = $self->{'VARS'};
-    my ($vars, $data) = Net::PSYC::MMPparse(\$$self{'I_BUFFER'}, $self->{'LF'});
+    my ($vars, $data) = parse_mmp(\$$self{'I_BUFFER'}, $self->{'LF'});
     
     return if (!defined($vars));
+
     if ($vars < 0) {
 	$self->{'I_LENGTH'} = $vars;
 	return;
     }
     
-    
-    # handle all modifiers.. =, +, - for MMP vars
-    # =
-    foreach (keys %{$$vars{'='}}) {
-	if($$vars{'='}->{$_} eq '') { # reset
-	    delete $_v->{$_};
-	} else {                         # assign
-	    $_v->{$_} = $$vars{'='}->{$_};
-	}
-    }
-    # +
-    foreach (keys %{$$vars{'+'}}) {
-	if (exists $_v->{$_}
-	    && ref $_v->{$_} eq 'ARRAY') {
-	    
-	    push(@{$_v->{$_}}, $$vars{'+'}->{$_}); # add to list
+    $self->trigger('receive', $vars, \$data);
+    unless (exists $self->{'me'} || $self->{'L'} || !exists $vars->{'_target'}) {
+	$self->{'me'} = $vars->{'_target'};
+	my $r = parse_uniform($vars->{'_target'});
+	if (ref $r && $r->{'host'}) {
+	    register_host('127.0.0.1', $r->{'host'});
+	} else {
+	    W("unparseable _target",0);
 	}
     }
     
-    
-    # -
-    foreach my $key (keys %{$$vars{'-'}}) {
-	if (exists $_v->{$key}
-	    && ref $_v->{$key} eq 'ARRAY') {
-		
-	    @{$_v->{$key}} = grep { $_ ne $$vars{'-'}->{$key}}
-					      @{$_v->{$key}};
-	}
-    }
-    
-    $vars = { %$_v, %{ $$vars{':'}||{} }};
-    
+    # TODO return -1 unless trigger(). 
+     
     unless (exists $vars->{'_source'}) {
 	$vars->{'_source'} = "psyc://$self->{'R_IP'}:$self->{'R_PORT'}/";
     } else {
-	my @u = Net::PSYC::parseUNL($vars->{'_source'});
-	unless (Net::PSYC::same_host($u[1], $self->{'R_IP'})) {
+	my $h = parse_uniform($vars->{'_context'}||$vars->{'_source'});
+	unless (ref $h) {
+	    W("I could not parse that uni: ".($vars->{'_context'}
+					     ||$vars->{'_source'}),0);
+	    return -1;
+	}
+	
+	unless (same_host($h->{'host'}, $self->{'R_IP'})) {
 	    if ($self->TRUST < 5) {
 		# just dont relay
-		print STDERR "TCP: Refused packet from $self->{'R_IP'}. (_source: $vars->{'_source'})\n" if Net::PSYC::DEBUG;
+		W("TCP: Refused packet from $self->{'R_IP'}. (_source: $vars->{'_source'})", 0);
 		return 0;
 	    }
 	} else {
-	    Net::PSYC::register_route($vars->{'_source'}, $self);
+	    # we will relay for you in the future
+	    register_route($vars->{'_source'}, $self);
 	}
     }
-    
+=skdjf    
     if (exists $vars->{'_source_relay'} && $self->{'_options'}->{'_accept_modules'} =~ /_onion/ && $self->{'r_options'}->{'_accept_modules'} =~ /_onion/) {
-	Net::PSYC::register_route($vars->{'_source_relay'}, $self);
-	print STDERR "_Onion: Use $self->{'R_IP'} to route $vars->{'_source_relay'}\n" if Net::PSYC::DEBUG > 1;
+	register_route($vars->{'_source_relay'}, $self);
+	W("_Onion: Use $self->{'R_IP'} to route $vars->{'_source_relay'}",2);
 	# remember pseudo-address to route packets back!
     }
-    
+=cut
     ####
     # FRAGMENT
     # handle fragmented data
@@ -416,7 +376,6 @@ sub recv () {
 	my $packet_id = '{'.($vars->{'_source'} || '').
 			'}{'.($vars->{'_target'} || '').
 			'}{'.($vars->{'_counter'} || '').'}';
-#	print STDERR "Fragment: $vars->{'_fragment'}\n";
 	if (!exists $self->{'CACHE'}->{$packet_id}) {
 	    $self->{'CACHE'}->{$packet_id} = [
 		{
@@ -431,38 +390,21 @@ sub recv () {
 	my $c = $self->{'CACHE'}->{$packet_id}->[1];
 	# increase the counter
 	$v->{'_amount'}++ if (!$c->[$vars->{'_fragment'}]);
+	#print STDERR "Fragment: $vars->{'_fragment'} (total: $vars->{'_amount_fragments'}, amount: $v->{'_amount'}, id: '$packet_id')\n";
 	    
 	$c->[$vars->{'_fragment'}] = $data;
 	if ($v->{'_amount'} == $v->{'_amount_fragments'}) {
-	    print STDERR "TCP: Fragmented packet complete!\n";
+	    W("TCP: Fragmented packet complete!");
 	    $data = join('', @$c);
 	} else {
 	    return 0;
 	}
     }
     ####
-    
     return 0 if ($data eq '');
     
-    my ($mc) = $data =~ m/^(_.+?)$/m;
-    if ($mc && $mc eq '_notice_circuit_established') { # hackily
-	foreach ('_using_modules', '_accept_modules') {
-	    if (exists $vars->{$_}) {
-		$self->{'r_options'}->{$_} = delete $vars->{$_};
-	    }
-	}
-	if (exists $vars->{'_target'}) { # NAT?? get our ip.. 
-	    # that is highly critical.. since we could fake
-	    # TRUST.. so.. remember to change that, el! TODO
-	    my ($ip) = $vars->{'_target'} =~ m/^psyc:\/\/(\S+?)[:\/]/;
-	    Net::PSYC::register_host($self->{'IP'}, $ip);
-	    
-	    #Net::PSYC::setBASE($vars->{'_target'}) if (Net::PSYC::);
-	}
-    }
-
-    print STDERR "TCP[$vars->{'_source'}] => ".$vars->{'_target'}.": ".
-		 ($mc || 'MMP')."\n" if Net::PSYC::DEBUG;
+    W("TCP[$vars->{'_source'}] => ".($vars->{'_target'}||''), 2);
+    $vars->{'_INTERNAL_origin'} = $self;
     return ($vars, $data);	
 }
 
@@ -477,7 +419,7 @@ package Net::PSYC::Circuit::L;
 sub read () {
     my $self = shift;
     my $socket = $self->{'SOCKET'}->accept();
-    Net::PSYC::Circuit->new($socket, $self->{'_options'});
+    my $obj = Net::PSYC::Circuit->new($socket, $self->{'_options'});
     return 1;
 }
 
@@ -488,7 +430,7 @@ sub send {
 }
 
 sub TRUST {
-    print "\nTCP: Dont TRUST() me, I'm ony listening.\n";
+    print "\nTCP: Dont TRUST() me, I'm only listening.\n";
 }
 
 1;

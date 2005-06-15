@@ -1,7 +1,7 @@
 package Net::PSYC::Tie::AbbrevHash;
 
 use vars qw($VERSION);
-$VERSION = '0.1';
+$VERSION = '0.2';
 
 use strict;
 # 'stolen' from Tie::StdHash;
@@ -19,9 +19,11 @@ sub FETCH {
     my $key = shift;
 
     while ( $key && !exists $self->{$key}) {
-	$key =~ s/_[^_]+$//;
+	unless ($key =~ s/_[^_]+$//) {
+	    return;
+	}
     }
-    return $self->{$key} if (exists $self->{$key});
+    return $self->{$key} if ($key && exists $self->{$key});
     return;
 }
 
