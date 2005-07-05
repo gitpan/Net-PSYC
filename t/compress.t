@@ -9,7 +9,7 @@ use Net::PSYC qw(:event :base make_psyc send_mmp get_connection setDEBUG refuse_
 
 BEGIN {	
     unless (eval "require Compress::Zlib") {
-	print "You need to install Compress::Zlib in order to use compression with Net::PSYC.\nSkipping all tests.\n";
+	print "You need to install Compress::Zlib in order to use compression with Net::PSYC.\nSkipping this test.\n";
 	exit;
     }
     require Test::Simple;

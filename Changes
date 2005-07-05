@@ -1,4 +1,4 @@
-0.13	Wed Jun 15 20:04:00 CEST 2005
+0.13 aka 0.14	Wed Jun 15 20:04:00 CEST 2005
     - added psyc-state for all object communication
     - added timer events
     - ssl and zlib negotiation
