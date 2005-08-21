@@ -301,10 +301,15 @@ tie %react, 'Net::PSYC::Tie::AbbrevHash';
     return unless ($obj);
 
     $obj->msg(@_);
-    exit();
+    # time to exit the client.
 },
 # könnte man auch rausnehmen
 '_status'		=> sub {
+    my $c = getContext(UNI());
+    return unless ($c);
+    $c->msg(@_) if $c;
+},
+'_error'		=> sub {
     my $c = getContext(UNI());
     return unless ($c);
     $c->msg(@_) if $c;

@@ -27,7 +27,7 @@ package Net::PSYC;
 # After six years of development and usage that's presumably appropriate, too.
 
 # last snapshot (0.12) made when i changed 0.12 into 0.13 -lynX
-$VERSION = '0.14';
+$VERSION = '0.15';
 
 use strict;
 
@@ -104,6 +104,14 @@ sub AUTOWATCH {
     return $AUTOWATCH;
 }
 
+sub SSL {
+    return 1 if (eval{
+		    require IO::Socket::SSL;
+		    my $t = $IO::Socket::SSL::VERSION;
+		    $t =~ /(\d)\.(\d+)/ && $1 + (0.1**(length($t) - 2))*$2 >= 0.93
+	    });
+}
+
 use Carp;
 use Socket qw(sockaddr_in inet_ntoa inet_aton);
 
@@ -146,7 +154,7 @@ sub import {
     }
 
     if ($list =~ s/ :tls | :ssl | :encrypt // && !$ANACHRONISM) {
-	if (eval { require IO::Socket::SSL }) {
+	if (SSL) {
 	    $_options{'_understand_modules'} .= ';_encrypt';
 	} else {
 	    W("You need IO::Socket::SSL to use _encrypt. require() said: $@", 0);   
@@ -302,44 +310,6 @@ sub shutdown {
     }
 }
 
-##############
-# MODULES
-=ui
-sub want_modules {
-    &accept_modules
-}
-
-sub require_modules {
-    return ();
-}
-
-# switches on modules for all connections established afterwards..
-# to switch on modules in existing connections use $obj->accept_modules(@list)
-sub accept_modules {
-    foreach my $module (@_) {
-	unless (grep {$module eq $_} qw(_state _compress _encrypt _fragments _length)) {
-	    W("$module is not supported by this implementation!",0);
-	    next;
-	}
-	next if (grep {$module eq $_} @{$_options{'_understand_modules'}});
-	push(@{$_options{'_understand_modules'}}, $module);
-    }
-    return @{$_options{'_understand_modules'}};
-}
-
-# switches off modules .. use $obj->refuse_modules(@list) for established 
-# connections
-sub refuse_modules {
-    foreach my $module (@_) {
-	@{$_options{'_understand_modules'}} = grep {
-	    $_ ne $module
-	} @{$_options{'_understand_modules'}};
-    }
-}
-=cut
-#
-##############
-
 #   get_connection ( target )
 sub get_connection {
     my $target = shift;
@@ -475,7 +445,10 @@ sub msg {
 	# in certain situations.. 
 	revoke($obj->{'SOCKET'}, 'w');
 	if (member($vars->{'_understand_modules'}, '_encrypt')) {
-	    return 1 unless eval{ require IO::Socket::SSL };
+	    unless (SSL) {
+		W("The other side offers SSL-encryption. It would be wise to install IO::Socket::SSL (v0.93 or above). Gentoo users emerge IO-Socket-SSL.", 0);
+		return 1;
+	    }
 	    $obj->fire('', '', '', { '_using_modules' => '_encrypt' } );
 	    $obj->{'SSL_client'} = 1;
 	    remove($obj->{'SOCKET'}, 'w');
@@ -525,7 +498,11 @@ sub msg {
 }
 sub psyctext {
     my $text = shift;
-    $text =~ s/\[(_\w+)\]/my $ref = ((exists $_[0]->{$1}) ? $_[0]->{$1} : ''); (ref $ref eq 'ARRAY') ? join(' ', @$ref) : $ref;/goe;
+    $text =~ s/\[\?\ (_\w+)\](.+?)\[\;\]/(exists $_[0]->{$1}) ? $2 : ""/ge;
+    $text =~ s/\[\?\ (_\w+)\](.+?)\[\:\](.+?)\[\;\]/(exists $_[0]->{$1}) ? $2 : $3/ge;
+    $text =~ s/\[\!\ (_\w+)\](.+?)\[\;\]/(!exists $_[0]->{$1}) ? $2 : ""/ge;
+    $text =~ s/\[\!\ (_\w+)\](.+?)\[\:\](.+?)\[\;\]/(!exists $_[0]->{$1}) ? $2 : $3/ge;
+    $text =~ s/\[(_\w+)\]/my $ref = ((exists $_[0]->{$1}) ? $_[0]->{$1} : ''); (ref $ref eq 'ARRAY') ? join(' ', @$ref) : $ref;/ge;
     return $text;
 }
 
@@ -968,11 +945,11 @@ Apart from the shortcuts below every single function may be exported seperately.
 
 =item use Net::PSYC qw(:encrypt);
 
-Try to use ssl for tcp connections. You need to have L<IO::Socket::SSL> installed. Right now only tls client functionality works. 
+Try to use ssl for tcp connections. You need to have L<IO::Socket::SSL> installed. Right now only tls client functionality works. Works with L<psycMUVE>. 
 
 =item use Net::PSYC qw(:compress);
 
-Use L<Compress::Zlib> to compress data sent via tcp. Works fine for connections to applications using Net::PSYC and L<psycMUVE>.
+Use L<Compress::Zlib> to compress data sent via tcp. Works fine with Net::PSYC and L<psycMUVE>.
 
 =item use Net::PSYC qw(:event);
 

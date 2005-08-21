@@ -241,7 +241,7 @@ Net::PSYC::Event - Event wrapper for various event systems.
 
 =head1 DESCRIPTION
 
-Net::PSYC::Event offers an interface to easily use L<Net::PSYC> with various different Event systems. It currently offers support for Event.pm, IO::Select and Gtk2.
+Net::PSYC::Event offers an interface to easily use L<Net::PSYC> with different Event systems. It currently offers support for Event.pm, IO::Select and Gtk2.
 
 =head1 SYNOPSIS
 

@@ -4,16 +4,17 @@ use strict;
 
 my $p_num = 0;
 my $s_num = 0;
-use Net::PSYC qw(:event :base make_psyc send_mmp get_connection setDEBUG refuse_modules :compress );
 
 
 BEGIN {	
     unless (eval "require Compress::Zlib") {
-	print "You need to install Compress::Zlib in order to use compression with Net::PSYC.\nSkipping this test.\n";
+	print "You need to install Compress::Zlib in order to use compression with Net::PSYC.\nSkipping all tests.\n";
 	exit;
     }
     require Test::Simple;
     import Test::Simple qw(tests 8);
+    require Net::PSYC;
+    import Net::PSYC qw(:event :base make_psyc send_mmp get_connection setDEBUG refuse_modules :compress );
 }
 
 ok( register_uniform(), 'registering main::msg for all incoming packets' );
