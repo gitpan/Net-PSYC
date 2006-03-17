@@ -1,3 +1,4 @@
+# vim:syntax=perl
 #!/usr/bin/perl -w
 
 use strict;
@@ -7,9 +8,13 @@ use Test::Simple tests => 7;
 my $p_num = 0;
 use Net::PSYC qw(:event :base setDEBUG);
 ok( register_uniform(), 'registering main::msg for all incoming packets' );
-ok( bind_uniform('psyc://:4405d/'), 'binding udp port 4405' );
+my $c = bind_uniform('psyc://127.0.0.1:d/'); 
+ok( $c, 'binding an udp port' );
+exit unless($c);
+my $target = sprintf("psyc://%s:%sd", $c->{'IP'}, $c->{'PORT'});
+print STDERR "\tI am $target\n";
 ok( my $d = Net::PSYC::Datagram->new(), 'getting an random udp port');
-ok( !$d->send('psyc://localhost:4405d/@test',
+ok( !$d->send($target.'/@test',
 	     Net::PSYC::make_psyc('_notice_test_udp', 'Hey there! That is a message for testing [_thing].', { _thing => 'udp'})), 'sending a psyc packet via udp' );
 
 ok( start_loop(), 'starting/stopping event loop' );

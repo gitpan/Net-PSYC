@@ -1,9 +1,12 @@
-0.15	Sun Aug 21 16:34:26 CEST 2005
-    - nothing new really just some minor fixed to be compliant to
-      psycMUVE 0.99
-
-0.14 ( broken, dead and buried )
-0.13	Wed Jun 15 20:04:00 CEST 2005
+0.21 	Thu Mar 16 23:21:54 CET 2006
+# my version numbering seems to be quite out of control.. thats just 
+# due to my lazyness. i dont like to compile cpan releases all the time.
+    - removed psyc-state again.. too many problems because psycmuve doesnt
+    - several bugs in the parsers
+    - support for file-transfer ..
+	- Net::PSYC::FileShare
+	- Net::PSYC::send_file()
+0.13 aka 0.14	Wed Jun 15 20:04:00 CEST 2005
     - added psyc-state for all object communication
     - added timer events
     - ssl and zlib negotiation

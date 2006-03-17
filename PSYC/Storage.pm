@@ -6,27 +6,23 @@ package Net::PSYC::Storage;
 # ... and maybe one day implements also _request_retrieve and _request_store
 # but then i'd have to do the linking as well.. and that doesn't belong here
 #
-$VERSION = '0.1';
+our $VERSION = '0.1';
 
 use strict;
-use Exporter;
 use Carp;
 use Net::PSYC;
+use base 'Exporter';
 
-use vars qw($VERSION @ISA @EXPORT @EXPORT_OK);
-
-@ISA = qw(Exporter);
-@EXPORT = qw(UNI nick pass);
-@EXPORT_OK = qw();
+our @EXPORT = qw(UNI nick pass);
 
 my $UNL = $ENV{PSYCUNL};
 my $UNI = $ENV{PSYC};
 my $pass = $ENV{PSYCPASS};
 my $nick = undef;
 
-sub path() { "/.psyc/" }
+sub path () { "/.psyc/" }
 
-sub readUNI {
+sub readUNI () {
 	my $I;
 	unless (open($I, $ENV{HOME}.path.'me')) {
 		warn "Consider putting your <UNI> into ~/.psyc/me\n...";
@@ -40,7 +36,7 @@ sub readUNI {
 	return $UNI;
 }
 
-sub readUNL {
+sub readUNL () {
 	my $I;
 	unless (open($I, $ENV{HOME}.path.'unl')) {
 		warn "Consider putting your <UNL> (containing your dyndns.host) into ~/.psyc/unl\n...";
@@ -56,23 +52,28 @@ sub readUNL {
 
 sub readpass {
 	my $me = lc(shift);
-	my $I;
+	my ($I, $UNI);
+
+	return 0 unless ($me);
 	unless (open($I, $ENV{HOME}.path.'auth')) {
 	    warn "Consider putting '<UNI> <pass>' into ~/.psyc/auth\n...";
 	    return 0;
 	}
 	while(<$I>) {
 		($UNI, $pass) = /^(psyc:\S+)\s+(\S+)$/;
-		last if $me and not $me cmp lc($UNI);
+		if (lc($UNI) eq $me) {
+		    close($I);
+		    return $pass;
+		}
 	}
 	close $I;
-	return $pass;
+	return 0;
 }
 
-sub UNL() { $UNL || readUNL; }
-sub UNI() { $UNI || readUNI; }
-sub pass() { $pass || readpass($UNI); }
-sub nick {
+sub UNL () { $UNL || readUNL; }
+sub UNI () { $UNI || readUNI; }
+sub pass { $pass || readpass($_[0]||$UNI); }
+sub nick () {
 	return $nick if $nick;
 	return $nick if $nick = $ENV{PSYCNICK} || $ENV{NICK};
 	if (UNI) {

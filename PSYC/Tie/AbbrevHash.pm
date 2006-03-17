@@ -1,7 +1,6 @@
 package Net::PSYC::Tie::AbbrevHash;
 
-use vars qw($VERSION);
-$VERSION = '0.2';
+our $VERSION = '0.2';
 
 use strict;
 # 'stolen' from Tie::StdHash;

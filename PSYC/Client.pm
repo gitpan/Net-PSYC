@@ -1,26 +1,24 @@
 package Net::PSYC::Client;
 
-$VERSION = '0.2';
-use vars qw($VERSION);
+use strict;
+
+our $VERSION = '0.4';
 #
 # implements some basic client functionality...
 # 
 # your perl-script (main::) needs to have following subs
 # - getPassword()
 # 
-use Exporter;
 use Net::PSYC qw(same_host parse_uniform make_uniform psyctext W register_route
-		);
+		get_connection);
 use Net::PSYC::Event qw(register_uniform unregister_uniform);
 use Net::PSYC::Tie::AbbrevHash;
-use Carp;
+use base 'Exporter';
 
+our @EXPORT = qw(register_context unregister_context register_new msg psycLink psycUnlink sendmsg UNI NICK enter talk get_context);
 
-@ISA = qw(Exporter);
-@EXPORT = qw(register_context unregister_context register_new msg psycLink psycUnlink sendmsg UNI NICK enter talk);
-
-my ($new, %ConextReg, $UNI, $NICK, %react, $SERVER_UNI, $SERVER_HOST, %tags);
-our (%friends);
+my ($new, %ContextReg, $UNI, $NICK, %react, $SERVER_UNI, $SERVER_HOST, %tags, $action);
+our %friends;
 sub UNI () { $UNI }
 
 # we like the idea how this "sub" gets inlined, that's why it looks so weird
@@ -28,12 +26,13 @@ sub NICK () { $NICK || $UNI? ($NICK = substr((parse_uniform($UNI))[4], 1)) : '' 
 
 #   register_context ( uni, obj )
 sub register_context {
+
     unless (ref $_[1]) {
 	delete $ContextReg{$_[0]};
-	W("register_context: $_[0]");
+	W1('register_context: %s', $_[0]);
 	return;
     }
-    W("register_context: $_[0], $_[1]");
+    W1('register_context(%s, %s)', $_[0], $_[1]);
     
     $ContextReg{$_[0]} = $_[1];
     return;
@@ -41,6 +40,15 @@ sub register_context {
 
 #   unregister_context ( uni )
 sub unregister_context {
+    W1('unregister_context(%s)', $_[0]);
+    if (ref $_[0]) {
+	foreach (keys %ContextReg) {
+	    if ($ContextReg{$_} eq $_[0]) {
+		delete $ContextReg{$_};
+		return;
+	    }
+	}
+    }
     delete $ContextReg{$_[0]};
 }
 
@@ -48,7 +56,7 @@ sub register_new {
     $new = shift;
 }
 
-sub getContext {
+sub get_context {
     my $vars = shift;
     my ($addr ,$obj, $u);
     unless (ref $vars eq 'HASH') {
@@ -60,23 +68,31 @@ sub getContext {
 
     $obj = $ContextReg{$addr};
     return $obj if ($obj);
-    if ($addr && ($u = parse_uniform($addr)) && $u) {
-	W("$addr does not have a path. Assuming it to be a person.", 0)
-	    if (!$u->{'object'});
+    if ($addr && ($u = parse_uniform($addr))) {
+
 	if ($u->{'object'} !~ /^\@/ && $new) { 
 	    my $name;
 	    if (same_host($u->{'host'}, $SERVER_HOST)) {
-		$name = substr($u->{'object'}, 1);
+
+		if ($u->{'scheme'} eq 'psyc') {
+		    $name = substr($u->{'object'}, 1);
+		} elsif ($u->{'user'}) {
+		    $name = $u->{'user'};
+		} else {
+		    $name = $addr;
+		}
 	    } else {
 		$name = $addr;
-		register_route($addr, $vars->{'_INTERNAL_origin'})
-		    if (exists $vars->{'_INTERNAL_origin'});
+		# this is maybe evil. should be done in the core lib since
+		# the psyc-routing rules should make that clear
+		#register_route($addr, $vars->{'_INTERNAL_origin'})
+		#    if (exists $vars->{'_INTERNAL_origin'});
 	    }
-	    $obj = &{$new}( $addr, $name, $silent );
+	    $obj = &{$new}( $addr, $name, 0 );
 	    register_context($addr, $obj);
 	}
     } else {
-	W("$addr does not seem to be a valid UNL. Dumping message.", 0);	
+	W0('%s does not seem to be a valid UNL. Dumping message.', $addr);	
 	return 0;
     }
     return $obj;
@@ -93,7 +109,7 @@ sub verify_enter {
     
     unless (defined delete $tags{$vars->{'_tag'}}
 	    || Net::PSYC::get_connection(UNI()) eq $vars->{'_INTERNAL_origin'}) {
-	W("$addr is trying to force us in.. revolt! (_tag is wrong)", 0);
+	W0('%s is trying to join us into a room without a proper _tag', $addr);
 	return 0;
     }
     $u = parse_uniform($addr); 
@@ -132,30 +148,66 @@ sub msg {
     unless ($mc) {
 	return 1;
     }
-    W("Client->msg('$source', '$mc', '$data', $vars)");
     my $func = $react{$mc};
     if ($func) {
 	&{$func}($source, $mc, $data, $vars);
     } else {
-	my $c = getContext($vars);
+	my $c = get_context($vars);
 	# we expect msg to do the right thing
 	unless (ref $c) {
 	    # this is a message from a room we never entered
 	    # we may think about sending _request_place_leave
+	    W0('Client->msg(%s, %s, %s, %s) is baklawa.', $source, $mc, $data,
+	       $vars);
 	    return 1;    
 	}
+
+	my $time = int($vars->{'_time_place'}||$vars->{'_time_raw'});
+	my @t = localtime(int($time));
+	$vars->{'_time'} = sprintf '%02d:%02d:%02d', $t[2], $t[1], $t[0];
+
 	$c->msg($source, $mc, $data, $vars) if $c;
     }
 
     return 1;
 }
 
+sub zwirbel {
+    my $word = shift;
+
+    return $word if (length($word) <= 3);
+
+    my @t = split(//, $word);
+    foreach (1..$#t-1) {
+	my $n = int(rand($#t - 1)) + 1;
+	if ($n != $_) {
+	    my $a = $t[$_];
+	    $t[$_] = $t[$n];
+	    $t[$n] = $a;
+	}
+    }
+    return join('', @t);
+}
+
 sub sendmsg {
     my ($target, $mc, $data, $vars, $MMPvars) = @_;
-    W("Client->sendmsg('$target', '$mc', '$data', $vars)");
+    if ($target =~ /^xmpp/) {
+	register_route($target, get_connection(UNI()));
+    }
+    W1('Client->sendmsg(%s, %s, %.10s ..., %s)', $target, $mc, $data, $vars);
     $MMPvars ||= {};
     $MMPvars->{'_identification'} ||= UNI();
-    Net::PSYC::sendmsg($target, $mc, $data, $vars, $MMPvars);
+
+    if ($mc =~ /^_message/) {
+	# this is cooler but muve may not be entirely ready for it yet
+	# $vars->{'_nick'} ||= NICK() unless (lc(NICK()) eq NICK());
+	$vars->{'_nick'} ||= NICK();
+	# hmm.. a bit excentric to force zwirbel on all users of perlpsyc
+	$vars->{'_action'} ||= zwirbel($action) 
+	    if ($action && $mc eq '_message_public');
+    }
+    
+    !Net::PSYC::sendmsg($target, $mc, $data, $vars, $MMPvars);
 }
 
 #   link to a given uni
@@ -163,7 +215,7 @@ sub psycLink {
     $UNI = shift;
     my $u = parse_uniform($UNI);
     unless ($u) {
-	return W("I cannot link to that uni: $UNI (It is not valid)",0);
+	return W1('I cannot link to that uni: %s (It is not valid)', $UNI);
     }
 #    register_uniform($UNI);
     register_uniform(); # this is no good
@@ -172,15 +224,13 @@ sub psycLink {
 			  $u->{'transport'}, ''); 
     Net::PSYC::sendmsg($UNI, '_request_link', '',
 		       { _password => main::getPassword(),
-#_nick => nick()
 		       });
     # we need to do that raw.. since we want no _identification	== UNI
 }
 
-sub psycUnlink {
+sub psycUnlink () {
     unregister_uniform(UNI());
     sendmsg(UNI(), '_request_exit');
-    # we need to do that raw.. since we want no _source	== UNI
 }
 
 sub enter {
@@ -198,9 +248,14 @@ sub enter {
 
 sub talk {
     my $target = shift;
-    unless (parse_uniform($target)) {
+    unless ($target =~ /psyc:\/\//) {
 	$target = $SERVER_UNI."/\~$target";
     }
+    my $vars = {
+	'_nick' => NICK(),
+    };
+    $vars->{'_action'} = $action if $action;
+
     sendmsg($target, '_message_private', join(' ', @_), {_nick=>NICK()});
 }
 
@@ -209,20 +264,23 @@ tie %react, 'Net::PSYC::Tie::AbbrevHash';
 %react = (
 '_echo_place_leave'	=> sub {
     my ($source, $mc, $data, $vars) = @_;
-    my $obj = getContext($vars->{'_context'});
+    my $obj = get_context($vars->{'_context'});
     return unless ($obj);
     unless ($obj->{'type'} eq 'place') {
-	return W("Got suspicious _echo_place_leave from $source.", 0);
+	return W0('Got an _echo_place_leave from someone (%s) who does not appear to be a room. Dropping message.', $source);
     }
     $obj->msg(@_);
     $obj->leanforwardandchokeyourself();
 },
 '_echo_set'		=> sub {
     my ($source, $mc, $data, $vars) = @_;
+    return unless($source eq UNI());
     if ($vars->{'_key'} eq 'name' && exists $vars->{'_value'}) {
 	$NICK = $vars->{'_value'};
+    } elsif ($vars->{'_key'} eq 'speakaction' && exists $vars->{'_value'}) {
+	$action = $vars->{'_value'};
     }
-    my $c = getContext($vars);
+    my $c = get_context($vars);
     return unless ($c);
     # we expect msg to do the right thing
     $c->msg($source, $mc, $data, $vars) if $c;
@@ -230,26 +288,26 @@ tie %react, 'Net::PSYC::Tie::AbbrevHash';
 '_message_echo_private'	=> sub {
     my ($source, $mc, $data, $vars) = @_;
 
-    my $obj = getContext($vars->{'_source_relay'} || $source);
+    my $obj = get_context($vars->{'_source_relay'} || $source);
     return unless ($obj);
 
     $obj->msg(@_);
 },
 '_notice_place_leave'	=> sub {
     my ($source, $mc, $data, $vars) = @_;
-    my $obj = getContext($vars);
+    my $obj = get_context($vars);
     return unless ($obj);
     $obj->msg(@_);
-    $obj->leave( $vars->{'_nick'} || $source );
+    $obj->leave( $vars->{'_nick'} || $source ) if $obj->can('leave');
 },
 '_echo_place_enter'	=> sub {
     my ($source, $mc, $data, $vars) = @_;
     unless (verify_enter($vars)) {
 	return;
     }
-    my $obj = getContext($vars);;
+    my $obj = get_context($vars);
     return unless ($obj);
-    $obj->enter( $vars->{'_nick'} || $source, UNI());
+    $obj->enter( $vars->{'_nick'} || $source, UNI()) if $obj->can('enter');
     $obj->msg(@_);
 },
 '_notice_place_enter'	=> sub {
@@ -257,9 +315,9 @@ tie %react, 'Net::PSYC::Tie::AbbrevHash';
     unless (verify_enter($vars)) {
 	return;
     }
-    my $obj = getContext($vars);;
+    my $obj = get_context($vars);
     return unless ($obj);
-    $obj->enter( $vars->{'_nick'} || $source, $source );
+    $obj->enter( $vars->{'_nick'} || $source, $source ) if $obj->can('enter');
     $obj->msg(@_);
 },
 '_query_password'	=> sub {
@@ -268,10 +326,10 @@ tie %react, 'Net::PSYC::Tie::AbbrevHash';
 },
 '_status_place_members'	=> sub {
     my ($source, $mc, $data, $vars) = @_;
-    my $obj = getContext($source);
+    my $obj = get_context($source);
     return unless ($obj);
     
-    if ($obj->can('members')) {
+    if ($obj->can('members') && exists $vars->{'_list_members_nicks'}) {
 	my $members = {}; # name -> uni
 	for (0 .. @{$vars->{'_list_members_nicks'}} - 1) {
 	    $members->{$vars->{'_list_members_nicks'}->[$_]} = $vars->{'_list_members'}->[$_];
@@ -290,33 +348,38 @@ tie %react, 'Net::PSYC::Tie::AbbrevHash';
 	    $NICK = $vars->{'_nick'};
 	}
 	Net::PSYC::get_connection($UNI)->TRUST(6);
+	sendmsg(UNI(), '_request_execute', 'set echo on');
     } else {
-	W("We received a _notice_link from an uni we did not try to link to.".
-	  "(uni: ".UNI().", source: $source)", 0);
+	W0('Got a _notice_link from an uni (%s) we did not try to link to.', 
+	    $source);
     }
 },
 '_notice_link_removed' => sub {
     my ($source, $mc, $data, $vars) = @_;
-    my $obj = getContext($source);
+    my $obj = get_context($source);
     return unless ($obj);
 
     $obj->msg(@_);
-    # time to exit the client.
 },
-# könnte man auch rausnehmen
-'_status'		=> sub {
-    my $c = getContext(UNI());
-    return unless ($c);
+'_status_place' 	=> sub {
+    my ($source, $mc, $data, $vars) = @_;
+    my $c = get_context($source);
+
     $c->msg(@_) if $c;
 },
-'_error'		=> sub {
-    my $c = getContext(UNI());
-    return unless ($c);
-    $c->msg(@_) if $c;
+'_info_description'	=> sub {
+    my ($source, $mc, $data, $vars) = @_;
+
+    if ($source eq UNI()) {
+	$action = $vars->{'_action'};
+    }
+    my $obj = get_context($source);
+    
+    $obj->msg(@_) if $obj;
 },
 '_list_friends_present'	=> sub {
     my ($source, $mc, $data, $vars) = @_;
-    my $obj = getContext($source);
+    my $obj = get_context($source);
     return unless ($obj);
 
     my $friends = {}; # name -> uni
@@ -332,7 +395,17 @@ tie %react, 'Net::PSYC::Tie::AbbrevHash';
     
     $obj->msg(@_);
 },
+'_notice' => sub {
+    my ($source, $mc, $data, $vars) = @_;
+    my $obj = $ContextReg{$vars->{'_context'}||$vars->{'_source'}};
+
+    $obj = get_context(UNI()) unless ($obj);
+    $obj->msg(@_) if $obj;
+},
 );
+$react{'_error'} = $react{'_notice'};
+$react{'_status'} = $react{'_notice'};
+$react{'_info_nickname'} = $react{'_info_description'};
 
 
 1;

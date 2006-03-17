@@ -1,7 +1,5 @@
 package Net::PSYC::MMP::Compress;
 
-# this modules offers zlib compression for tcp-connections..
-
 use strict;
 
 use Compress::Zlib;
@@ -28,19 +26,38 @@ sub init {
     if ($hook eq 'decrypt') {
 #	($self->{'i'}, $status) = inflateInit( Dictionary => $dict );
 	($self->{'i'}, $status) = inflateInit( );
+if (Net::PSYC::FORK) {
+	$self->{'connection'}->hook('receive', $self, 10);
+} else {
+	$self->receive();
+}
 	if ($status == Z_OK) {
-	    $self->{'connection'}->hook('decrypt', $self);
+	    $self->{'connection'}->hook('decrypt', $self, 10);
 	    return 1;
 	}
     } elsif ($hook eq 'encrypt') {
 #	($self->{'d'}, $status) = deflateInit( Dictionary => $dict );
 	($self->{'d'}, $status) = deflateInit( );
 	if ($status == Z_OK) {
-	    $self->{'connection'}->hook('encrypt', $self);
+	    $self->{'connection'}->hook('encrypt', $self, -10);
 	    return 1;
 	}
     }
     return 0;
+}
+
+sub receive {
+    my $self = shift;
+    $self->{'connection'}->rmhook('receive', $self);
+
+    my ($out, $status) = $self->{'i'}->inflate(\$$self{'connection'}->{'I_BUFFER'});
+    if ($status == Z_OK) {
+	$self->{'connection'}->{'I_BUFFER'} = $out;
+	return 1;
+    }
+    Net::PSYC::W0('Could not decompress the incoming stream from %s: %s',
+	$self->{'connection'}->{'psycaddr'}, $self->{'i'}->msg());
+    return 0;	
 }
 
 sub encrypt {
@@ -66,6 +83,10 @@ sub decrypt {
 	print STDERR "You did not prepare me for zlib-deflation for $self->{'connection'}->{'R_IP'}:$self->{'connection'}->{'R_PORT'}\n";
 	return -1;
     }
+    
+    # TODO find out whether its better to use compress/uncompress. these
+    # objects seem to be rather unneeded.
+    
     my ($out, $status) = $self->{'i'}->inflate($data);
     if ($status == Z_OK) {
 	$$data = $out;

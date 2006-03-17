@@ -34,5 +34,10 @@ INSTALL:
     make
     make install
 
+CVS:
+
+    to get the latest sources from cvs, type
+
+    cvs -d :pserver:anonymous@cvs.psyced.org:/CVS/anonCVS/ co perlpsyc
 
 http://perlpsyc.pages.de

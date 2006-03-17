@@ -1,17 +1,13 @@
 package Net::PSYC::Event::Event;
 
-use vars qw($VERSION);
-$VERSION = '0.1';
+our $VERSION = '0.1';
 
-use Exporter;
 use strict;
 use Event qw(loop unloop);
 use Net::PSYC qw(W);
-use vars qw(@ISA @EXPORT_OK);
 
-@ISA = qw(Exporter);
-@EXPORT_OK = qw(init can_read can_write has_exception add remove start_loop stop_loop revoke);
-
+use base qw(Exporter);
+our @EXPORT_OK = qw(init can_read can_write has_exception add remove start_loop stop_loop revoke);
 
 my (%s, %revoke);
 
@@ -30,38 +26,50 @@ sub has_exception {
 #   add (\*fd, flags, cb, repeat)
 sub add {
     my ($fd, $flags, $cb, $repeat) = @_;
+    W2('add(%s, %s, %p, %d)', $fd, $flags, $cb, $repeat||0);
     if (!$flags || !$cb || !ref $cb eq 'CODE') {
 	croak('Net::PSYC::Event::Event::add() requires flags and a callback!');
     }
-#    print STDERR "Added ".scalar($fd)."\n";
     
     my $watcher;
     if ($flags eq 't') {
 	$watcher = Event->timer( after => $fd,
 				 repeat => defined($repeat) ? $repeat : 0,
 				 cb => (!$repeat) 
-		    ? sub { remove(scalar($watcher)); $cb->() } 
-		    : $cb );	
-	$s{'t'}->{scalar($watcher)} = $watcher;
-	return scalar($watcher);
-    } else {
+		    ? sub { remove(($watcher)); $cb->() } 
+		    : sub { remove(($watcher)) unless $cb->() });	
+	$s{'t'}->{$watcher} = $watcher;
+	return $watcher;
+    } elsif ($flags !~ /[^rew]/) {
+	my $temp = substr($flags, 0, 1);
+	my $count;
+	my $sub = sub { 
+	    if ($cb->($fd, $count++) == -1) {
+		$watcher->now();
+	    } else {
+		$count = 0;
+	    }
+	};
 	$watcher = Event->io( fd => $fd,
-			      cb => $cb,
+			      cb => $sub,
 			      poll => $flags,
 			      repeat => defined($repeat) ? $repeat : 1);
+	foreach ('r', 'w', 'e') {
+	    next if ($flags !~ /$_/);
+	    $s{$_}->{($fd)} = $watcher;
+	    $revoke{$_}->{($fd)} = $watcher if (defined($repeat) && $repeat == 0);
+	}
+    } else {
+	die "read the docu, you punk! '$flags' is _not_ a valid set of flags.";
     }
 
-    foreach ('r', 'w', 'e') {
-	next if (!$flags =~ /$_/);
-	$s{$_}->{scalar($fd)} = $watcher;
-	$revoke{$_}->{scalar($fd)} = $watcher if (defined($repeat) && $repeat == 0);
-    }
 }
 #   revoke( \*fd[, flags] )
 sub revoke {
-    my $name = scalar(shift);
+    my $sock = shift;
+    my $name = ($sock);
     my $flags = shift;
-    W("revoked $name",2);
+    W2('revoked %s', $name);
     foreach ('r', 'w', 'e') {
 	next if($flags && !$flags =~ /$_/);
 	$s{$_}->{$name}->again() if(exists $s{$_}->{$name});
@@ -70,9 +78,10 @@ sub revoke {
 
 #   remove ( \*fd[, flags] )
 sub remove {
-    my $name = scalar(shift);
+    my $sock = shift;
+    my $name = ($sock);
     my $flags = shift;
-    W("removing $name",2);
+    W2('removing %s', $name);
     foreach ('r', 'w', 'e', 't') {
 	next if($flags && $flags !~ /$_/);
 	next unless (exists $s{$_}->{$name});
@@ -83,7 +92,7 @@ sub remove {
 }
 
 sub start_loop {
-    loop();
+    !loop();
 }
 
 sub stop_loop {

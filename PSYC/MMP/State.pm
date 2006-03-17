@@ -1,14 +1,63 @@
 package Net::PSYC::MMP::State;
 
 use Storable qw(dclone);
+use strict;
 
+sub outstate {
+    my $self = shift;
+    my ($mod, $var, $val) = @_;
+
+    return 1 if ($mod eq ':');
+    
+    if ($mod eq '=') {
+	$self->{'state'}->{$var} = $val;
+	return 1;
+    } elsif ($mod eq '+') {
+	Net::PSYC::_augment($self->{'state'}, $var, $val);
+	return 1;
+    } elsif ($mod eq '-') {
+	return 1 if (Net::PSYC::_diminish($self->{'state'}, $var, $val));
+    }
+    return 0;
+}
+
+sub state {
+    {}
+}
+
+sub assign {
+    my $self = shift;
+    my ($var, $val) = @_;
+
+    unless ($val) {
+	delete $self->{'vars'}->{$var};
+	return 1;
+    }
+    $self->{'vars'}->{$var} = $val;
+    $self->negotiate($val) if ($var eq '_using_modules');
+}
+
+sub augment {
+    my $self = shift;
+    my ($var, $val) = @_; 
+    Net::PSYC::_augment($self->{'vars'}, @_);
+    
+    $self->negotiate($val) if ($var eq '_using_modules');
+}
+
+sub diminish {
+    my $self = shift;
+    Net::PSYC::_diminish($self->{'vars'}, @_);
+}
+
+=old
 sub new {
     my $class = shift;
     my $obj = shift;
     my $self = {
 	'state' => {},
 	'vars' => {},
-	'temp_state' => {},
+	'state_temp' => {},
 	'connection' => $obj,
     };
     return bless $self, $class;
@@ -16,9 +65,13 @@ sub new {
 
 sub init { 
     my $self = shift;
-    $self->{'connection'}->hook('send', $self);
+    # do state after encoding and stuff has been done, does not make a 
+    # difference really
+    $self->{'connection'}->hook('send', $self, -10);
     $self->{'connection'}->hook('sent', $self);
-    $self->{'connection'}->hook('receive', $self);
+    $self->{'connection'}->hook('receive', $self, 10);
+    # do encoding-stuff _after_ state. this is essential if _encoding
+    # ist stateful.
     return 1;
 }
 
@@ -30,7 +83,7 @@ sub send {
     # the current behaviour is to _set every var that
     # has not changed in 3 packages..
     my $state = $self->{'state'};
-    my $temp_state = {};
+    my $state_temp = {};
     my $newvars = {};
 
     # to bypass automatic state.. use ':'
@@ -39,7 +92,7 @@ sub send {
 	next if (/^:_/);
 	if (/^=_/) {
 	    $newvars->{$_} = $vars->{$_};
-	    $temp_state->{substr($_, 1)} = [0, $vars->{$_}];
+	    $state_temp->{substr($_, 1)} = [0, $vars->{$_}];
 	    next;
 	}
 	if (/^\+_/) {
@@ -47,13 +100,13 @@ sub send {
 	    $newvars->{$_} = $vars->{$_};
 	    if (exists $state->{$key}) {
 		unless (ref $state->{$key}->[1] eq 'ARRAY') {
-		    $temp_state->{$key}->[1] = [ $state->{$key}->[1] ];
+		    $state_temp->{$key}->[1] = [ $state->{$key}->[1] ];
 		}
-		push(@{$temp_state->{$key}->[1]}, $vars->{$_});
+		push(@{$state_temp->{$key}->[1]}, $vars->{$_});
 	    } else {
-		$temp_state->{$key}->[1] = [ $vars->{$_} ];
+		$state_temp->{$key}->[1] = [ $vars->{$_} ];
 	    }
-	    $temp_state->{$key}->[0] = 0; # we assume it to be consistent
+	    $state_temp->{$key}->[0] = 0; # we assume it to be consistent
 	    next;
 	}
 	if (/^-_/) {
@@ -61,33 +114,33 @@ sub send {
 	    $newvars->{$_} = $vars->{$_};
 	    if (exists $state->{$key}) {
 		if (ref $state->{$key}->[1] eq 'ARRAY') {
-		    $temp_state->{$key}->[1] = grep { $_ eq $vars->{$_} } 
+		    $state_temp->{$key}->[1] = grep { $_ eq $vars->{$_} } 
 						    @{$state->{$key}->[1]}; 
 		} else {
 		    if ($state->{$key}->[1] eq $vars->{$_}) {
-			$temp_state->{$key}->[0] = -1;	
+			$state_temp->{$key}->[0] = -1;	
 		    }
 		}
 	    } else {
 		# WOU?
 	    }
-	    $temp_state->{$key}->[0] = 0; # we assume it to be consistent
+	    $state_temp->{$key}->[0] = 0; # we assume it to be consistent
 	    next;
 	}
 	
 	if (!exists $state->{$_}) {
-	    $temp_state->{$_} = [1, $vars->{$_}];
+	    $state_temp->{$_} = [1, $vars->{$_}];
 	    $newvars->{$_} = $vars->{$_};
 	    next;
 	}
 	if ($state->{$_}->[1] ne $vars->{$_}) { # var has changed
 	    if ($state->{$_}->[0] == 3) { # unset var
-		$temp_state->{$_} = [1, $vars->{$_}];
+		$state_temp->{$_} = [1, $vars->{$_}];
 		$newvars->{"=$_"} = '';
 	    } elsif ($state->{$_}->[0] > 1) { # decrease counter
-		$temp_state->{$_} = [ $state->{$_}->[0] - 1, $state->{$_}->[1]];
+		$state_temp->{$_} = [ $state->{$_}->[0] - 1, $state->{$_}->[1]];
 	    } elsif ($state->{$_}->[0] != 0) { # nothing set.. 
-		$temp_state->{$_} = [1, $vars->{$_}];
+		$state_temp->{$_} = [1, $vars->{$_}];
 	    }
 	    $newvars->{$_} = $vars->{$_};
 	    next;
@@ -101,24 +154,24 @@ sub send {
 	    } elsif ($state->{$_}->[0] < 2) {
 		$newvars->{$_} = $vars->{$_};
 	    }
-	    $temp_state->{$_} = [$state->{$_}->[0] + 1, $state->{$_}->[1]];
+	    $state_temp->{$_} = [$state->{$_}->[0] + 1, $state->{$_}->[1]];
 	}
     }
 
     foreach (keys %$state) {
-	next if (exists $newvars->{$_});
+	next if (exists $newvars->{$_} || exists $vars->{$_});
 	
 	if ($state->{$_}->[0] == 3) { # unset var
 	    $newvars->{"=$_"} = '';
-	    $temp_state->{$_} = [ 2, $state->{$_}->[1]];
+	    $state_temp->{$_} = [ 2, $state->{$_}->[1]];
 	    next;
     	}
-	$temp_state->{$_} = [ $state->{$_}->[0] - 1, $state->{$_}->[1]]
+	$state_temp->{$_} = [ $state->{$_}->[0] - 1, $state->{$_}->[1]]
 	    if ($state->{$_}->[0] != 0);
-	$newvars->{$_} = '' if ($state->{$_}->[0] > 3 || $state->{$_}->[0] == 0);
+	$newvars->{$_} = '' if ($state->{$_}->[0] > 3);
     }
     
-    $self->{'temp_state'} = $temp_state;
+    $self->{'state_temp'} = $state_temp;
     %$vars = %$newvars; 
     return 1;
 }
@@ -127,12 +180,12 @@ sub sent {
     my $self = shift;
     my ($vars, $data) = @_;
     
-    foreach (keys %{$self->{'temp_state'}}) {
-	if ($self->{'temp_state'}->{$_}->[0] == -1) {
+    foreach (keys %{$self->{'state_temp'}}) {
+	if ($self->{'state_temp'}->{$_}->[0] == -1) {
 	    delete $self->{'state'}->{$_};
 	    next;
 	}
-	$self->{'state'}->{$_} = $self->{'temp_state'}->{$_};
+	$self->{'state'}->{$_} = $self->{'state_temp'}->{$_};
     }
     return 1;
 }
@@ -198,5 +251,5 @@ sub receive {
     }
     return 1;
 }
-
+=cut
 1;

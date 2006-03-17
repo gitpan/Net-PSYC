@@ -1,17 +1,11 @@
 package Net::PSYC::Datagram;
 
-use vars qw($VERSION);
-$VERSION = '0.5';
+our $VERSION = '0.5';
 
 use strict;
 use IO::Socket::INET;
 
-use Net::PSYC::Event qw(add watch);
-
-INIT {            
-    require Net::PSYC;
-    import Net::PSYC qw(W sendmsg same_host send_mmp parse_uniform AUTOWATCH makeMSG make_psyc parse_psyc parse_mmp PSYC_PORT PSYCS_PORT register_host register_route make_mmp UNL);
-}
+import Net::PSYC qw( watch add W sendmsg same_host send_mmp parse_uniform BLOCKING makeMSG make_psyc parse_psyc parse_mmp PSYC_PORT PSYCS_PORT register_host register_route make_mmp UNL);
 
 sub TRUST {
     return 1;
@@ -26,7 +20,7 @@ sub new {
     my %a = (LocalPort => $port, Proto => 'udp');
     $a{LocalAddr} = $addr if $addr;
     my $socket = IO::Socket::INET->new(%a)
-	or (W("UDP bind to $addr:$port says: $!",0) && return 0);
+	or return $!;
     my $self = {
 	'SOCKET' => $socket,
 	'IP' => $socket->sockhost,
@@ -37,9 +31,13 @@ sub new {
 	'O_COUNT'  => 0,
 	'LF' => '',
     };
-    W("UDP bind to $self->{'IP'}:$self->{'PORT'} successful");
+    W1('UDP bind to %s:%s successful', $self->{'IP'}, $self->{'PORT'});
     bless $self, $class; 
-    watch($self) if (AUTOWATCH());
+
+    watch($self) unless (BLOCKING() & 2);
+    add($self->{'SOCKET'}, 'w', sub {$self->write()}, 0) 
+	unless (BLOCKING() & 1);
+    
     return $self;
 }
 
@@ -47,11 +45,11 @@ sub new {
 sub send {
     my $self = shift;
     my ( $target, $data, $vars ) = @_;
-    W("send($target, $data, ".($vars||'undef').")",2);
+    W2('send(%s, %s, %s)', $target, $data, $vars);
     
-    push(@{$self->{'O_BUFFER'}}, [ [$target, $data, $vars ] ]);
+    push(@{$self->{'O_BUFFER'}}, [ [$vars, $data, $target, 0 ] ]);
 
-    if (!AUTOWATCH() || $Net::PSYC::ANACHRONISM) { # send the packet instantly
+    if (BLOCKING() || $Net::PSYC::ANACHRONISM) { # send the packet instantly
         return !$self->write(); 
     } else {
         Net::PSYC::Event::revoke($self->{'SOCKET'});
@@ -66,12 +64,12 @@ sub write () {
     
     # get a packet from the buffer
     my $packet = shift(@{${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]});
-    my $target = shift(@$packet);
+    my $target = $packet->[2];
     my ($user, $host, $port, $type, $object) = parse_uniform($target);
     
     $port ||= PSYC_PORT();
     
-    $packet->[1]->{'_target'} ||= $target;
+    $packet->[0]->{'_target'} ||= $target;
 
 # funny, but not what we want.. returns 0.0.0.0 for INADDR_ANY and even
 # when the ip is useful, the port may not - the other side should better
@@ -80,20 +78,26 @@ sub write () {
 #   $vars->{'_source'} |= "psyc://$self->{'IP'}:$self->{'PORT'}/";
 
     my $m = ".\n"; # empty packet!
-    $m .= make_mmp(reverse @$packet);
+    $m .= make_mmp($packet->[0], $packet->[1]);
     
-    ($port && $host) or W('usage: obj->send( $target[, $method[, $data[, $vars[, $mvars]]]] )',0);
+    unless ($host) {
+	W0('This target (%s) needs a host. Dropping message.', $target);
+	return 1;
+    }
 
     my $taddr = gethostbyname($host); # hm.. strange thing!
     my $tin = sockaddr_in($port, $taddr);
     
     if (!defined($self->{'SOCKET'}->send($m, 0, $tin))) {
-	unshift(@$packet, $target);
+	if (++$packet->[3] >= 3) {
+	    W0('Delivery of a udp packet to %s failed for the third time. Dropping message.', $target);
+	    return 1;
+	}
         unshift(@{${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]}, $packet);
-        W($!,0);
-        return $!;
+        return 1;
     }
-    W("UDP[$self->{'IP'}:$self->{'PORT'}] <= ".($packet->[1]->{'_source'}||UNL()));
+    W1('UDP[%s:%s] <= %s', $host, $port, 
+	$packet->[0]->{'_source'} || UNL());
     if (!scalar(@{${$self->{'O_BUFFER'}}[$self->{'O_COUNT'}]})) {
         # all fragments of this packet sent
         splice(@{$self->{'O_BUFFER'}}, $self->{'O_COUNT'}, 1);
@@ -103,7 +107,7 @@ sub write () {
         $self->{'O_COUNT'} = 0 if (!${$self->{'O_BUFFER'}}[++$self->{'O_COUNT'}]);
     }
     if(scalar(@{$self->{'O_BUFFER'}})) {
-	if (!AUTOWATCH() || $Net::PSYC::ANACHRONISM) {
+	if (BLOCKING() || $Net::PSYC::ANACHRONISM) {
 	    $self->write();
 	} else {
 	    Net::PSYC::Event::revoke($self->{'SOCKET'});
@@ -117,7 +121,7 @@ sub read () {
     my ($data, $last);
     
     $self->{'LAST_RECV'} = $self->{'SOCKET'}->recv($data, 8192); # READ socket
-    
+
     return if (!$data); # connection lost !?
     # gibt es nen 'richtigen' weg herauszufinden, ob der socket noch lebt?
 

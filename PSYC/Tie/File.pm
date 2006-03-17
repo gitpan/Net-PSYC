@@ -1,7 +1,6 @@
 package Net::PSYC::Tie::File;
 
-use vars qw($VERSION);
-$VERSION = '0.1';
+our $VERSION = '0.1';
 
 # this modules ties a file to an array.. not line-wise but in chunks of bytes.
 # whatever.. fuck my english
@@ -9,6 +8,7 @@ $VERSION = '0.1';
 use bytes;
 use strict;
 use Carp;
+use Fcntl;
 
 my %files;
 
@@ -16,23 +16,22 @@ sub TIEARRAY {
     # offset and size are used to specify a range of bytes
     # in the file
     my ($class, $file, $chunksize, $offset, $range) = @_;
-    my $fh;
+    local *FH;
     
     unless (exists $files{$file}) {
-	open($fh, '<', $file) or do {
-	    print STDERR "Could not open file $file. Says: $!\n";
+	sysopen(*FH, $file, O_RDONLY|O_NOFOLLOW) or do {
 	    return;
 	};
-	binmode($fh);
-	$files{$file} = [ $fh, 1 ];
+	binmode(*FH);
+	$files{$file} = [ *FH, 1 ];
     } else {
-	$fh = $files{$file}->[0];
+	*FH = $files{$file}->[0];
 	$files{$file}->[1]++;
     }
     
+    # a -s seems enough to me..
     my @stat = stat($file);
     unless (@stat) {
-	print STDERR "Could not stat file $file. Says: $!\n";
 	return;
     }
     $offset ||= 0;
@@ -44,10 +43,10 @@ sub TIEARRAY {
 	$range = $stat[7] - $offset
     }
     
-    my $array = [ 0 .. int($range / $chunksize) ];
+    my $array = [ 0 .. int($range / $chunksize) - (($range % $chunksize) ? 0 : 1)];
     
     return bless {
-	'FH'	=>	$fh,
+	'FH'	=>	*FH,
 	'BYTES'	=>	$chunksize,
 	'SIZE'	=>	$stat[7],
 	'A'	=>	$array,
@@ -98,6 +97,7 @@ sub UNTIE {
     unless (--$files{$self->{'NAME'}}->[1]) {
 	close $self->{'FH'};
 	delete $files{$self->{'NAME'}};
+	delete $self->{'A'};
     }
 }
 
